@@ -52,6 +52,8 @@ public sealed class TunnelVm : ObservableObject
 
     public bool IsActive => State is TunnelState.Running or TunnelState.Starting;
     public bool CanToggle => !IsBusy && State is not TunnelState.Stopping;
+    public bool CanRemove => !IsBusy;
+    public bool CanSave => IsDirty && !IsBusy;
     bool HasRecentHandshake => Stats?.LastHandshake is { } h && DateTimeOffset.UtcNow - h < TimeSpan.FromMinutes(3);
 
     public string StateText => IsBusy ? "Bitte warten …" : State switch
@@ -77,15 +79,23 @@ public sealed class TunnelVm : ObservableObject
     public string DnsText => string.IsNullOrWhiteSpace(Saved.Dns) ? "System-DNS" : Saved.Dns;
     public string Subtitle => string.IsNullOrWhiteSpace(Saved.Endpoint) ? AddressText : Saved.Endpoint;
     public string PeerCountText => $"{Original.Peers.Count()} Peer(s)";
+    public bool UsesManualRoutes => ConfigBuilder.UsesManualRoutes(Original);
 
-    public string RoutingSummary => Saved.Mode == RouteMode.Split
-        ? "Split-Tunnel: " + (string.IsNullOrWhiteSpace(Saved.SplitAllowedIps) ? "—" : Saved.SplitAllowedIps)
-        : "Gesamter Traffic"
-          + (Saved.AllowLan ? " · LAN erreichbar" : Saved.KillSwitch ? " · Kill-Switch" : "")
-          + (Saved.IncludeIPv6 ? " · inkl. IPv6" : "");
+    public string RoutingSummary
+    {
+        get
+        {
+            if (UsesManualRoutes) return "Manuelle Routen (Table = off)";
+            var summary = Saved.Mode == RouteMode.Split
+                ? "Split-Tunnel: " + (string.IsNullOrWhiteSpace(Saved.SplitAllowedIps) ? "—" : Saved.SplitAllowedIps)
+                : "Gesamter Traffic" + (Saved.AllowLan ? " · LAN erreichbar" : "")
+                  + (Saved.IncludeIPv6 ? " · inkl. IPv6" : "");
+            return ConfigBuilder.HasKillSwitch(ConfigBuilder.Build(Original, Saved)) ? summary + " · Kill-Switch" : summary;
+        }
+    }
 
     void RaiseStatus() => OnPropertyChanged(
-        nameof(IsActive), nameof(CanToggle), nameof(StateText), nameof(StateBrush),
+        nameof(IsActive), nameof(CanToggle), nameof(CanRemove), nameof(CanSave), nameof(StateText), nameof(StateBrush),
         nameof(ConnectButtonText), nameof(ConnectButtonBrush), nameof(HandshakeText),
         nameof(RxText), nameof(TxText), nameof(EndpointText), nameof(SaveButtonText));
 
@@ -123,7 +133,7 @@ public sealed class TunnelVm : ObservableObject
         get => _allowLan;
         set { if (SetEdit(ref _allowLan, value)) OnPropertyChanged(nameof(KillSwitchEnabled)); }
     }
-    public bool KillSwitchEnabled => !AllowLan;
+    public bool KillSwitchEnabled => !AllowLan && ConfigBuilder.SupportsKillSwitch(Original);
 
     string _lanExceptions = "";
     public string LanExceptions { get => _lanExceptions; set => SetEdit(ref _lanExceptions, value); }
@@ -150,7 +160,7 @@ public sealed class TunnelVm : ObservableObject
     public bool IsDirty
     {
         get => _isDirty;
-        private set { if (Set(ref _isDirty, value)) OnPropertyChanged(nameof(SaveButtonText)); }
+        private set { if (Set(ref _isDirty, value)) OnPropertyChanged(nameof(CanSave)); }
     }
 
     public string SaveButtonText => IsActive ? "Speichern & neu verbinden" : "Speichern";
@@ -213,11 +223,18 @@ public sealed class TunnelVm : ObservableObject
             { error = "Endpoint muss das Format host:port haben."; return false; }
         }
 
+        var splitRoutes = ConfigBuilder.SplitList(SplitAllowedIps);
+        var exceptions = string.Join(", ", ConfigBuilder.SplitList(LanExceptions));
+        var mode = IsFullTunnel ? RouteMode.FullTunnel : RouteMode.Split;
+        var preserveRoutes = Saved.PreserveImportedRoutes == true && mode == Saved.Mode && (IsSplit
+            ? splitRoutes.SequenceEqual(ConfigBuilder.SplitList(Saved.SplitAllowedIps), StringComparer.OrdinalIgnoreCase)
+            : KillSwitch == Saved.KillSwitch && AllowLan == Saved.AllowLan && IncludeIPv6 == Saved.IncludeIPv6 &&
+              string.Equals(exceptions, Saved.LanExceptions, StringComparison.OrdinalIgnoreCase));
+
         if (IsSplit)
         {
-            var nets = ConfigBuilder.SplitList(SplitAllowedIps);
-            if (nets.Count == 0) { error = "Für den Split-Tunnel mindestens ein Netz angeben (z. B. 192.168.0.0/24)."; return false; }
-            var bad = nets.FirstOrDefault(n => !Cidr.IsValid(n));
+            if (splitRoutes.Count == 0 && !preserveRoutes) { error = "Für den Split-Tunnel mindestens ein Netz angeben (z. B. 192.168.0.0/24)."; return false; }
+            var bad = splitRoutes.FirstOrDefault(n => !Cidr.IsValid(n));
             if (bad is not null) { error = $"Ungültiges Netz: {bad}"; return false; }
         }
         if (IsFullTunnel && AllowLan)
@@ -229,12 +246,13 @@ public sealed class TunnelVm : ObservableObject
         options = new TunnelOptions
         {
             Dns = string.Join(", ", ConfigBuilder.SplitList(Dns)),
-            Mode = IsFullTunnel ? RouteMode.FullTunnel : RouteMode.Split,
+            Mode = mode,
             KillSwitch = KillSwitch,
             AllowLan = AllowLan,
-            LanExceptions = string.Join(", ", ConfigBuilder.SplitList(LanExceptions)),
+            LanExceptions = exceptions,
             IncludeIPv6 = IncludeIPv6,
-            SplitAllowedIps = string.Join(", ", ConfigBuilder.SplitList(SplitAllowedIps)),
+            PreserveImportedRoutes = preserveRoutes,
+            SplitAllowedIps = string.Join(", ", splitRoutes),
             Endpoint = ep,
             Mtu = mtu,
             PersistentKeepalive = keepalive,
@@ -248,8 +266,9 @@ public sealed class TunnelVm : ObservableObject
         if (TryGetOptions(out var o, out var err))
         {
             ValidationError = null;
-            AllowedIpsPreview = string.Join(", ", ConfigBuilder.ComputeAllowedIps(o));
-            EffectivePreview = ConfigBuilder.Build(Original, o).Serialize(maskSecrets: true);
+            var config = ConfigBuilder.Build(Original, o);
+            AllowedIpsPreview = config.Peers.FirstOrDefault()?.Get("AllowedIPs") ?? "";
+            EffectivePreview = config.Serialize(maskSecrets: true);
         }
         else
         {
@@ -269,7 +288,7 @@ public sealed class TunnelVm : ObservableObject
         Original = cfg;
         ApplySaved(options);
         LoadEdit(options);
-        OnPropertyChanged(nameof(AddressText), nameof(PeerCountText));
+        OnPropertyChanged(nameof(AddressText), nameof(PeerCountText), nameof(KillSwitchEnabled), nameof(UsesManualRoutes));
     }
 
     // ---------- Formatierung ----------

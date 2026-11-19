@@ -66,8 +66,8 @@ Log
 DNS
   Welche DNS-Server (Namensauflösung) im Tunnel genutzt werden. Mehrere
   mit Komma trennen, z. B. "192.168.0.10, 1.1.1.1". Leer lassen, um den
-  normalen DNS von Windows zu verwenden. Die angegebenen DNS-Server werden
-  automatisch durch den Tunnel geleitet.
+  normalen DNS von Windows zu verwenden. Bei Änderungen ergänzt WG Client
+  fehlende Routen zu den DNS-Servern, wenn WireGuard die Routen verwaltet.
 
 Gesamten Traffic durch den Tunnel leiten
   Alles – Internet und alle Netze – läuft über den VPN-Server.
@@ -82,7 +82,8 @@ Gesamten Traffic durch den Tunnel leiten
   - Kill-Switch
     Blockiert jeglichen Internetverkehr außerhalb des Tunnels, solange der
     Tunnel aktiv ist. So kann nichts "vorbei" gehen, falls die Verbindung
-    hakt. Nicht gleichzeitig mit "Lokales Netzwerk erreichbar" möglich.
+    hakt. Verfügbar bei genau einem Peer, automatischen Routen und deaktivierter
+    LAN-Ausnahme. Bei "Table = off" verwaltet WireGuard keine Windows-Routen.
 
   - IPv6 ebenfalls durch den Tunnel leiten
     Verhindert, dass IPv6-Verbindungen am VPN vorbeigehen. Unterstützt
@@ -97,8 +98,8 @@ Endpoint, MTU, Keepalive
   - Endpoint: Adresse und Port des VPN-Servers (host:port).
   - MTU: Paketgröße; leer lassen = automatisch. Bei Verbindungsproblemen
     mit großen Downloads hilft oft 1280 oder 1380.
-  - Keepalive: hält die Verbindung hinter Routern offen. 25 Sekunden ist
-    ein guter Wert; leer oder 0 = aus.
+  - Keepalive: hält die Verbindung des ersten Peers hinter Routern offen.
+    25 Sekunden ist ein guter Wert. Leer oder 0 schaltet Keepalive aus.
 
 Beim Windows-Start automatisch verbinden
   Der Tunnel startet zusammen mit Windows – auch ohne Anmeldung und ohne

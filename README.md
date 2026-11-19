@@ -16,7 +16,7 @@
 - **Import** von WireGuard-Konfigurationen per Button, Drag & Drop oder „Öffnen mit“
 - **Verbinden/Trennen** mit Live-Status: Handshake, empfangene/gesendete Daten, Endpoint
 - **Optionen ohne Datei-Bearbeitung**
-  - DNS-Server festlegen (werden automatisch durch den Tunnel geroutet)
+  - DNS-Server festlegen und bei Änderungen fehlende Tunnelrouten ergänzen
   - Gesamten Traffic durch den Tunnel **oder** Split-Tunnel für bestimmte Netze
   - Kill-Switch an/aus
   - Lokales Netzwerk (Drucker, NAS) erreichbar lassen

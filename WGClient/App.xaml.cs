@@ -24,8 +24,9 @@ public partial class App : Application
             try
             {
                 var conf = FindConfArg(e.Args);
-                if (conf is not null) File.WriteAllText(PendingImportFile, Path.GetFullPath(conf));
-                EventWaitHandle.OpenExisting(ShowEventName).Set();
+                if (conf is not null) Core.TunnelStore.QueueImport(conf);
+                using var showEvent = EventWaitHandle.OpenExisting(ShowEventName);
+                showEvent.Set();
             }
             catch { /* ignorieren */ }
             Shutdown();
@@ -34,6 +35,14 @@ public partial class App : Application
 
         DispatcherUnhandledException += OnUnhandled;
         base.OnStartup(e);
+
+        try { new Core.TunnelStore().EnsureCreated(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "WG Client – Konfigurationsspeicher", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
 
         var window = new MainWindow();
         MainWindow = window;
@@ -53,9 +62,6 @@ public partial class App : Application
         _mutex?.Dispose();
         base.OnExit(e);
     }
-
-    /// <summary>Übergabedatei für "Öffnen mit", wenn bereits eine Instanz läuft (Ordner nur für Admins).</summary>
-    public static string PendingImportFile => Path.Combine(Core.TunnelStore.Root, "pending-import.txt");
 
     public static string? FindConfArg(IEnumerable<string> args) =>
         args.FirstOrDefault(a => a.EndsWith(".conf", StringComparison.OrdinalIgnoreCase) && File.Exists(a));

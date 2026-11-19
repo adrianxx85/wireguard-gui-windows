@@ -11,6 +11,15 @@ public static class ConfigBuilder
     public static List<string> SplitList(string? s) =>
         (s ?? "").Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
+    public static bool UsesManualRoutes(WgConfig cfg) =>
+        string.Equals(cfg.Interface?.Get("Table"), "off", StringComparison.OrdinalIgnoreCase);
+
+    public static bool SupportsKillSwitch(WgConfig cfg) => cfg.Peers.Count() == 1 && !UsesManualRoutes(cfg);
+
+    public static bool HasKillSwitch(WgConfig cfg) => SupportsKillSwitch(cfg) &&
+        SplitList(cfg.Peers.Single().Get("AllowedIPs")).Any(route =>
+            IPNetwork.TryParse(route, out var network) && network.PrefixLength == 0);
+
     public static WgConfig Build(WgConfig original, TunnelOptions o)
     {
         var cfg = original.Clone();
@@ -19,15 +28,18 @@ public static class ConfigBuilder
         iface.Set("DNS", string.Join(", ", SplitList(o.Dns)));
         iface.Set("MTU", o.Mtu?.ToString());
 
-        var peers = cfg.Peers.ToList();
-        if (peers.Count > 0)
+        if (cfg.Peers.FirstOrDefault() is { } first)
         {
-            var first = peers[0];
-            first.Set("AllowedIPs", string.Join(", ", ComputeAllowedIps(o)));
+            var imported = SplitList(first.Get("AllowedIPs"));
+            var routes = o.PreserveImportedRoutes == true ? new List<string>(imported) : ComputeAllowedIps(o);
+            if (!UsesManualRoutes(cfg) && (o.PreserveImportedRoutes != true ||
+                !SplitList(original.Interface?.Get("DNS")).SequenceEqual(SplitList(o.Dns), StringComparer.OrdinalIgnoreCase)))
+                AddDnsRoutes(routes, cfg.Peers.Skip(1), o.Dns);
+            if (!routes.SequenceEqual(imported, StringComparer.OrdinalIgnoreCase))
+                first.Set("AllowedIPs", string.Join(", ", routes));
             if (!string.IsNullOrWhiteSpace(o.Endpoint)) first.Set("Endpoint", o.Endpoint.Trim());
+            first.Set("PersistentKeepalive", o.PersistentKeepalive is > 0 ? o.PersistentKeepalive.ToString() : null);
         }
-        foreach (var p in peers)
-            p.Set("PersistentKeepalive", o.PersistentKeepalive is > 0 ? o.PersistentKeepalive.ToString() : null);
 
         return cfg;
     }
@@ -36,7 +48,7 @@ public static class ConfigBuilder
     /// WireGuard für Windows aktiviert den Kill-Switch automatisch, wenn (bei genau einem Peer)
     /// eine /0-Route in AllowedIPs steht. Ohne Kill-Switch wird daher 0.0.0.0/1 + 128.0.0.0/1 verwendet.
     /// </summary>
-    public static List<string> ComputeAllowedIps(TunnelOptions o)
+    static List<string> ComputeAllowedIps(TunnelOptions o)
     {
         var result = new List<string>();
 
@@ -61,20 +73,25 @@ public static class ConfigBuilder
             if (o.IncludeIPv6) result.AddRange(["::/1", "8000::/1"]);
         }
 
-        // DNS-Server immer durch den Tunnel erreichbar machen (z. B. 192.168.x.x im entfernten Netz)
-        foreach (var token in SplitList(o.Dns))
+        return result.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    static void AddDnsRoutes(List<string> routes, IEnumerable<WgSection> otherPeers, string dns)
+    {
+        var otherRoutes = otherPeers.SelectMany(peer => SplitList(peer.Get("AllowedIPs"))).ToList();
+        foreach (var token in SplitList(dns))
         {
             if (!IPAddress.TryParse(token, out var ip)) continue; // Suchdomäne
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                if (!Cidr.ContainsV4(result, ip)) result.Add($"{ip}/32");
-            }
-            else if (!(result.Contains("::/0") || (result.Contains("::/1") && result.Contains("8000::/1"))))
-            {
-                result.Add($"{ip}/128");
-            }
+            if (routes.Concat(otherRoutes).Any(route => CoversAddress(route, ip))) continue;
+            routes.Add($"{ip}/{(ip.AddressFamily == AddressFamily.InterNetwork ? 32 : 128)}");
         }
+    }
 
-        return result.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    static bool CoversAddress(string route, IPAddress address)
+    {
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+            return Cidr.ContainsV4([route], address);
+        return IPNetwork.TryParse(route, out var network) ? network.Contains(address) :
+            IPAddress.TryParse(route, out var host) && address.Equals(host);
     }
 }

@@ -51,10 +51,8 @@ public partial class MainWindow : Window
         ShowFromTray();
         try
         {
-            if (!File.Exists(App.PendingImportFile)) return;
-            var path = File.ReadAllText(App.PendingImportFile).Trim();
-            File.Delete(App.PendingImportFile);
-            if (File.Exists(path)) ImportFile(path);
+            var path = Core.TunnelStore.TakePendingImport();
+            if (path is not null && File.Exists(path)) ImportFile(path);
         }
         catch (Exception ex) { _vm.StatusMessage = "Übergebene Datei konnte nicht importiert werden: " + ex.Message; }
     }

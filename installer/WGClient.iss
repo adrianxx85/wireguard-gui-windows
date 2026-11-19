@@ -155,26 +155,35 @@ end;
 
 { ---------- Deinstallation ---------- }
 
-function ServiceExists(const Name: String): Boolean;
-var
-  ResultCode: Integer;
+function QuoteServicePath(const Path: String): String;
 begin
-  Result := Exec(ExpandConstant('{sys}\sc.exe'), 'query "WireGuardTunnel$' + Name + '"', '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if (Pos(' ', Path) > 0) or (Pos(#9, Path) > 0) then
+    Result := '"' + Path + '"'
+  else
+    Result := Path;
+end;
+
+function IsOwnedTunnel(const Name, ConfigPath: String): Boolean;
+var
+  ImagePath: String;
+begin
+  Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\WireGuardTunnel$' + Name, 'ImagePath', ImagePath)
+    and (CompareText(ImagePath, QuoteServicePath(WireGuardExe) + ' /tunnelservice ' + QuoteServicePath(ConfigPath)) = 0);
 end;
 
 procedure StopAppTunnels;
 var
   FindRec: TFindRec;
-  Name: String;
+  Name, ActiveDir: String;
   ResultCode: Integer;
 begin
   if not FileExists(WireGuardExe) then Exit;
-  if FindFirst(ExpandConstant('{commonappdata}\WGClient\active\*.conf'), FindRec) then
+  ActiveDir := ExpandConstant('{commonappdata}\WGClient\active\');
+  if FindFirst(ActiveDir + '*.conf', FindRec) then
   try
     repeat
       Name := ChangeFileExt(FindRec.Name, '');
-      if ServiceExists(Name) then
+      if IsOwnedTunnel(Name, ActiveDir + FindRec.Name) then
         Exec(WireGuardExe, '/uninstalltunnelservice "' + Name + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     until not FindNext(FindRec);
   finally

@@ -26,7 +26,7 @@
                 <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
                     <Button Content="+  Konfiguration importieren" Style="{StaticResource AccentButton}" Click="Import_Click" Padding="14,9"/>
                     <Button Content="Tunnel entfernen" Style="{StaticResource GhostButton}" Margin="0,6,0,0"
-                            Click="Delete_Click" IsEnabled="{Binding HasSelection}"/>
+                            Click="Delete_Click" IsEnabled="{Binding Selected.CanRemove, FallbackValue=False}"/>
                     <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,12,0,12"/>
                     <Button Click="Coffee_Click" Background="#2A2318" BorderBrush="#4A3A22" Foreground="#F5C27A" Padding="12,8"
                             ToolTip="{x:Static local:App.CoffeeUrl}">
@@ -178,7 +178,7 @@
                                             <Button Content="Verwerfen" Style="{StaticResource GhostButton}" Margin="0,0,8,0"
                                                     IsEnabled="{Binding IsDirty}" Click="Revert_Click"/>
                                             <Button Content="{Binding SaveButtonText}" Style="{StaticResource AccentButton}"
-                                                    IsEnabled="{Binding IsDirty}" Click="Save_Click"/>
+                                                    IsEnabled="{Binding CanSave}" Click="Save_Click"/>
                                         </StackPanel>
                                         <TextBlock Text="{Binding ValidationError}" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center"
                                                    TextWrapping="Wrap" Margin="0,0,12,0"/>
@@ -191,9 +191,12 @@
                                         <TextBlock Text="DNS" Style="{StaticResource SectionHeader}" Margin="0,0,0,10"/>
                                         <TextBox Text="{Binding Dns, UpdateSourceTrigger=PropertyChanged}"/>
                                         <TextBlock Style="{StaticResource Muted}" Margin="0,6,0,0"
-                                                   Text="Mehrere Server oder Suchdomänen mit Komma trennen (z. B. 192.168.0.10, 1.1.1.1). Leer = DNS des Systems verwenden. DNS-Server werden automatisch durch den Tunnel geroutet."/>
+                                                   Text="Mehrere Server oder Suchdomänen mit Komma trennen. Leer = System-DNS. Bei Änderungen ergänzt WG Client fehlende Routen für eingetragene DNS-Server, wenn WireGuard die Routen verwaltet."/>
 
                                         <TextBlock Text="Routing" Style="{StaticResource SectionHeader}"/>
+                                        <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,10"
+                                                   Visibility="{Binding UsesManualRoutes, Converter={StaticResource BoolToVis}}"
+                                                   Text="Die Konfiguration enthält Table = off. WireGuard richtet die Windows-Routen deshalb nicht automatisch ein."/>
                                         <StackPanel>
                                             <RadioButton IsChecked="{Binding IsFullTunnel}">
                                                 <StackPanel>
@@ -225,7 +228,7 @@
                                             <CheckBox IsChecked="{Binding KillSwitch}" IsEnabled="{Binding KillSwitchEnabled}" Margin="0,14,0,0">
                                                 <StackPanel>
                                                     <TextBlock Text="Kill-Switch: Traffic außerhalb des Tunnels blockieren"/>
-                                                    <TextBlock Style="{StaticResource Muted}" Text="Verhindert Leaks, solange der Tunnel aktiv ist. Nur mit genau einem Peer wirksam, nicht kombinierbar mit LAN-Zugriff."/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Verfügbar bei genau einem Peer, automatischen Routen und deaktivierter LAN-Ausnahme."/>
                                                 </StackPanel>
                                             </CheckBox>
 
@@ -267,7 +270,7 @@
                                             </StackPanel>
                                             <StackPanel Grid.Column="4">
                                                 <TextBlock Text="Keepalive (Sek.)" Style="{StaticResource FieldLabel}"/>
-                                                <TextBox Text="{Binding KeepaliveText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Leer oder 0 = aus. Typisch 25 hinter NAT."/>
+                                                <TextBox Text="{Binding KeepaliveText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Gilt für den ersten Peer. Leer oder 0 = aus. Typisch 25 hinter NAT."/>
                                             </StackPanel>
                                         </Grid>
 

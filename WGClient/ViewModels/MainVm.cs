@@ -41,7 +41,6 @@ public sealed class MainVm : ObservableObject
 
     public void Load()
     {
-        _store.EnsureCreated();
         Tunnels.Clear();
         foreach (var name in _store.ListNames())
         {
@@ -49,6 +48,7 @@ public sealed class MainVm : ObservableObject
             {
                 var cfg = WgConfig.Parse(_store.ReadOriginal(name));
                 var opts = _store.ReadOptions(name) ?? TunnelOptions.FromConfig(cfg);
+                opts.UpdateImportedDefaults(cfg);
                 Tunnels.Add(new TunnelVm(name, cfg, opts));
             }
             catch (Exception ex)
@@ -70,7 +70,12 @@ public sealed class MainVm : ObservableObject
 
         var name = TunnelStore.SanitizeName(Path.GetFileNameWithoutExtension(path));
         var existing = Tunnels.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null && !confirmOverwrite(name)) return null;
+        if (existing is not null)
+        {
+            EnsureIdle(existing);
+            if (!confirmOverwrite(name)) return null;
+            EnsureIdle(existing);
+        }
 
         var opts = TunnelOptions.FromConfig(cfg);
         _store.SaveOriginal(name, text);
@@ -105,11 +110,8 @@ public sealed class MainVm : ObservableObject
         var errors = cfg.Validate();
         if (errors.Count > 0) throw new InvalidOperationException(string.Join(Environment.NewLine, errors));
 
-        await RunBusy(t, $"Verbinde \"{t.Name}\" …", async () =>
-        {
-            var path = _store.WriteActive(t.Name, cfg.Serialize());
-            await WireGuardService.ConnectAsync(t.Name, path, t.Saved.Autostart);
-        });
+        await RunBusy(t, $"Verbinde \"{t.Name}\" …", () =>
+            WireGuardService.ConnectAsync(t.Name, t.Saved.Autostart, () => _store.WriteActive(t.Name, cfg.Serialize())));
         StatusMessage = $"\"{t.Name}\" gestartet.";
     }
 
@@ -121,6 +123,7 @@ public sealed class MainVm : ObservableObject
 
     public async Task SaveAsync(TunnelVm t)
     {
+        EnsureIdle(t);
         if (!t.TryGetOptions(out var opts, out var error))
             throw new InvalidOperationException(error);
 
@@ -133,14 +136,15 @@ public sealed class MainVm : ObservableObject
 
     public async Task DeleteAsync(TunnelVm t)
     {
-        if (t.IsActive || WireGuardService.GetState(t.Name) != TunnelState.Disconnected)
+        await RunBusy(t, $"Entferne \"{t.Name}\" …", async () =>
+        {
             await WireGuardService.DisconnectAsync(t.Name);
-        _store.Delete(t.Name);
-        var idx = Tunnels.IndexOf(t);
-        Tunnels.Remove(t);
-        Selected = Tunnels.Count == 0 ? null : Tunnels[Math.Min(idx, Tunnels.Count - 1)];
+            _store.Delete(t.Name);
+            var idx = Tunnels.IndexOf(t);
+            Tunnels.Remove(t);
+            Selected = Tunnels.Count == 0 ? null : Tunnels[Math.Min(idx, Tunnels.Count - 1)];
+        });
         StatusMessage = $"\"{t.Name}\" entfernt.";
-        StatesChanged?.Invoke();
     }
 
     public void Export(TunnelVm t, string path)
@@ -178,15 +182,25 @@ public sealed class MainVm : ObservableObject
 
     async Task RunBusy(TunnelVm t, string message, Func<Task> action)
     {
+        EnsureIdle(t);
         t.IsBusy = true;
         StatusMessage = message;
         try { await action(); }
         finally
         {
-            t.IsBusy = false;
-            t.State = WireGuardService.GetState(t.Name);
-            t.Stats = t.State == TunnelState.Running ? await WireGuardService.GetStatsAsync(t.Name) : null;
-            StatesChanged?.Invoke();
+            try
+            {
+                t.State = WireGuardService.GetState(t.Name);
+                t.Stats = null;
+                StatesChanged?.Invoke();
+            }
+            finally { t.IsBusy = false; }
         }
+    }
+
+    void EnsureIdle(TunnelVm t)
+    {
+        if (t.IsBusy || !Tunnels.Contains(t))
+            throw new InvalidOperationException($"Der Tunnel \"{t.Name}\" ist derzeit nicht verfügbar.");
     }
 }
