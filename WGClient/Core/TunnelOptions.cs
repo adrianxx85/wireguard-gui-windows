@@ -38,7 +38,8 @@ public sealed class TunnelOptions
         {
             Dns = iface?.Get("DNS") ?? "",
             Mode = full ? RouteMode.FullTunnel : RouteMode.Split,
-            KillSwitch = ConfigBuilder.HasKillSwitch(cfg),
+            // Bei Split-Importen wirkt der Schalter nicht; beim Wechsel auf "Gesamter Traffic" soll er dann an sein.
+            KillSwitch = full ? ConfigBuilder.HasKillSwitch(cfg) : ConfigBuilder.SupportsKillSwitch(cfg),
             IncludeIPv6 = v6Default || (allowed.Contains("::/1") && allowed.Contains("8000::/1")),
             PreserveImportedRoutes = true,
             SplitAllowedIps = full ? "" : string.Join(", ", allowed),
@@ -53,12 +54,13 @@ public sealed class TunnelOptions
         var imported = FromConfig(cfg);
         if (PreserveImportedRoutes is null)
         {
-            // In 1.0.0 IPv6 was selected by default, even for an IPv4-only profile.
+            // Profil aus 1.0.0: Dort war IPv6 immer vorausgewählt, auch bei reinen IPv4-Profilen.
+            // Split-Profile bleiben bei berechneten Routen, damit die in 1.0.0 ergänzten DNS-Routen erhalten bleiben
+            // (SplitAllowedIps entspricht ohnehin den importierten Routen).
             var allowed = ConfigBuilder.SplitList(cfg.Peers.FirstOrDefault()?.Get("AllowedIPs"));
-            var oldKillSwitch = imported.Mode == RouteMode.Split || allowed.Contains("0.0.0.0/0") || allowed.Contains("::/0");
-            PreserveImportedRoutes = Mode == imported.Mode && !AllowLan && IncludeIPv6 &&
-                (Mode == RouteMode.Split || (KillSwitch == oldKillSwitch && string.IsNullOrWhiteSpace(LanExceptions))) &&
-                ConfigBuilder.SplitList(SplitAllowedIps).SequenceEqual(ConfigBuilder.SplitList(imported.SplitAllowedIps), StringComparer.OrdinalIgnoreCase);
+            var oldKillSwitch = allowed.Contains("0.0.0.0/0") || allowed.Contains("::/0");
+            PreserveImportedRoutes = Mode == RouteMode.FullTunnel && imported.Mode == RouteMode.FullTunnel &&
+                !AllowLan && IncludeIPv6 && KillSwitch == oldKillSwitch && string.IsNullOrWhiteSpace(LanExceptions);
             if (PreserveImportedRoutes == true)
             {
                 IncludeIPv6 = imported.IncludeIPv6;

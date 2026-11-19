@@ -25,6 +25,10 @@ public partial class App : Application
             {
                 var conf = FindConfArg(e.Args);
                 if (conf is not null) Core.TunnelStore.QueueImport(conf);
+            }
+            catch { /* ignorieren – Fenster trotzdem nach vorne holen */ }
+            try
+            {
                 using var showEvent = EventWaitHandle.OpenExisting(ShowEventName);
                 showEvent.Set();
             }

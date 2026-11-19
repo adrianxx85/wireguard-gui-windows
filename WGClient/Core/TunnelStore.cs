@@ -71,7 +71,10 @@ public sealed partial class TunnelStore
     }
 
     static IOException UnsafeEntry(FileSystemInfo entry) =>
-        new($"Unsicherer Konfigurationspfad: \"{entry.FullName}\". Nur Administratoren und SYSTEM dürfen Zugriff haben.");
+        new($"Unsicherer Konfigurationspfad: \"{entry.FullName}\". Nur Administratoren und SYSTEM dürfen Besitzer sein und Zugriff haben." +
+            Environment.NewLine + Environment.NewLine +
+            $"Abhilfe: WG Client beenden, den Ordner \"{Root}\" löschen und die .conf-Dateien danach neu importieren. " +
+            "Wurde der Ordner nicht von dir angelegt oder verändert, prüfe den PC bitte auf Fremdzugriffe.");
 
     static string CheckedFile(string path) => CheckedFile(path, out _);
 

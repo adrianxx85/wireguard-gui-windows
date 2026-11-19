@@ -47,7 +47,12 @@ public static class WireGuardService
         return key is not null || NativeServices.Query(ServiceName(tunnel)) is not null;
     }
 
-    public static async Task ConnectAsync(string tunnel, bool autostart, Action writeConfig)
+    // WireGuard löst Endpoint-Hostnamen beim Start mit Wiederholungen auf (bis ca. 40 s ohne Netz).
+    static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
+    static readonly TimeSpan RemoveTimeout = TimeSpan.FromSeconds(15);
+
+    /// <returns>true, wenn der Tunnel läuft; false, wenn der Dienst nach dem Zeitlimit noch startet.</returns>
+    public static async Task<bool> ConnectAsync(string tunnel, bool autostart, Action writeConfig)
     {
         EnsureInstalled();
         if (IsServiceInstalled(tunnel))
@@ -55,8 +60,10 @@ public static class WireGuardService
             if (!IsOwned(tunnel))
                 throw new InvalidOperationException($"Ein anderer WireGuard-Dienst verwendet bereits den Namen \"{tunnel}\".");
             await DisconnectAsync(tunnel);
-            if (IsServiceInstalled(tunnel))
-                throw new InvalidOperationException($"Der Dienstname \"{tunnel}\" ist weiterhin belegt.");
+            // Vor dem Neuanlegen muss der alte Dienst wirklich entfernt sein, sonst schlägt die Installation fehl.
+            if (!await WaitUntilAsync(() => !IsServiceInstalled(tunnel), RemoveTimeout))
+                throw new InvalidOperationException($"Der Dienstname \"{tunnel}\" ist weiterhin belegt. " +
+                    "Ist die Windows-Diensteverwaltung geöffnet? Bitte schließen und erneut versuchen.");
         }
 
         writeConfig();
@@ -76,12 +83,13 @@ public static class WireGuardService
                     throw new InvalidOperationException($"Autostart konnte nicht deaktiviert werden (Code {scCode}). {scOutput}".Trim());
             }
 
-            await WaitUntilAsync(() => GetState(tunnel) switch
+            // Läuft der Start länger, bleibt der Dienst bestehen – die Statusaktualisierung zeigt den weiteren Verlauf.
+            return await WaitUntilAsync(() => GetState(tunnel) switch
             {
                 TunnelState.Running => true,
                 TunnelState.Starting => false,
                 _ => throw new InvalidOperationException($"Der Dienst für \"{tunnel}\" wurde vorzeitig beendet. Details stehen im WireGuard-Log.")
-            }, $"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestartet.");
+            }, StartTimeout);
         }
         catch (Exception startError)
         {
@@ -101,7 +109,11 @@ public static class WireGuardService
         var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
         if (code != 0)
             throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
-        await WaitUntilAsync(() => !IsOwned(tunnel), $"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig entfernt.");
+        // Hält ein anderes Programm noch ein Dienst-Handle, bleibt der Eintrag als "zum Löschen markiert" bestehen.
+        // Der Tunnel ist dann trotzdem getrennt – gestoppt genügt hier.
+        if (!await WaitUntilAsync(() => !IsOwned(tunnel) ||
+                NativeServices.Query(ServiceName(tunnel)) is null or NativeServices.Status.Stopped, RemoveTimeout))
+            throw new TimeoutException($"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestoppt.");
     }
 
     public static async Task<TunnelStats?> GetStatsAsync(string tunnel)
@@ -143,14 +155,16 @@ public static class WireGuardService
             throw new InvalidOperationException("WireGuard für Windows ist nicht installiert (https://www.wireguard.com/install/).");
     }
 
-    static async Task WaitUntilAsync(Func<bool> condition, string timeoutMessage)
+    /// <returns>true, sobald die Bedingung erfüllt ist; false nach Ablauf des Zeitlimits.</returns>
+    static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var sw = Stopwatch.StartNew();
         while (!condition())
         {
-            if (sw.Elapsed >= TimeSpan.FromSeconds(15)) throw new TimeoutException(timeoutMessage);
+            if (sw.Elapsed >= timeout) return false;
             await Task.Delay(300);
         }
+        return true;
     }
 
     static async Task<(int ExitCode, string Output)> RunAsync(string exe, params string[] args)

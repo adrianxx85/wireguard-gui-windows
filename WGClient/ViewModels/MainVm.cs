@@ -110,9 +110,12 @@ public sealed class MainVm : ObservableObject
         var errors = cfg.Validate();
         if (errors.Count > 0) throw new InvalidOperationException(string.Join(Environment.NewLine, errors));
 
-        await RunBusy(t, $"Verbinde \"{t.Name}\" …", () =>
-            WireGuardService.ConnectAsync(t.Name, t.Saved.Autostart, () => _store.WriteActive(t.Name, cfg.Serialize())));
-        StatusMessage = $"\"{t.Name}\" gestartet.";
+        var running = false;
+        await RunBusy(t, $"Verbinde \"{t.Name}\" …", async () =>
+            running = await WireGuardService.ConnectAsync(t.Name, t.Saved.Autostart, () => _store.WriteActive(t.Name, cfg.Serialize())));
+        StatusMessage = running
+            ? $"\"{t.Name}\" gestartet."
+            : $"\"{t.Name}\" startet noch (WireGuard wartet z. B. auf Netzwerk/DNS). Details im Log.";
     }
 
     public async Task DisconnectAsync(TunnelVm t)
