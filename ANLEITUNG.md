@@ -57,8 +57,12 @@ Neuen Tunnel erstellen (ohne .conf-Datei)
      der Server bereits eine Adresse zugewiesen, trage sie manuell ein.
      Das Schlüsselpaar wird automatisch erzeugt. Einen vorgegebenen privaten
      Schlüssel kannst du stattdessen einfügen.
-  3. Server bzw. Gegenstelle: öffentlicher Schlüssel, Endpoint (host:port
-     oder [IPv6-Adresse]:port), optional Pre-shared Key und Keepalive.
+  3. Server bzw. Gegenstelle: Kopiere zuerst deinen eigenen öffentlichen
+     Schlüssel und tausche ihn mit der Gegenstelle aus. Lass den Assistenten
+     bis zur Antwort geöffnet, damit das noch ungespeicherte Schlüsselpaar
+     erhalten bleibt. Trage danach den öffentlichen Schlüssel der Gegenstelle
+     und ihren Endpoint (host:port oder [IPv6-Adresse]:port) ein. Pre-shared
+     Key und Keepalive sind optional.
      Für Point-to-Site gib die Netze hinter dem Server ein. Für Point-to-Point
      gib eine einzelne Gegenstellenadresse an, optional mit /32 (IPv4) oder
      /128 (IPv6). Beide Geräte brauchen verschiedene Adressen derselben Familie.

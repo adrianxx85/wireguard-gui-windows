@@ -117,6 +117,16 @@
 
                 <!-- ===== Schritt 2: Server / Gegenstelle ===== -->
                 <StackPanel Visibility="{Binding IsStep2, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="Eigener öffentlicher Schlüssel" Style="{StaticResource FieldLabel}"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Kopieren" Margin="8,0,0,0" Click="CopyPublicKey_Click"
+                                AutomationProperties.Name="Eigenen öffentlichen Schlüssel kopieren"/>
+                        <TextBox Text="{Binding PublicKey, Mode=OneWay}" Style="{StaticResource KeyBox}" IsReadOnly="True"
+                                 AutomationProperties.Name="Eigener öffentlicher Schlüssel"/>
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Gib diesen Schlüssel an die Gegenstelle weiter und trage ihren öffentlichen Schlüssel unten ein. Das Schlüsselpaar wird beim Abschließen des Assistenten gespeichert."/>
+
                     <TextBlock Text="{Binding PeerKeyLabel}" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding ServerPublicKey, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource KeyBox}"/>
                     <TextBlock Style="{StaticResource Hint}" Text="44 Zeichen, endet auf „=“. Steht in deren WireGuard-Konfiguration bzw. kommt vom Betreiber."/>

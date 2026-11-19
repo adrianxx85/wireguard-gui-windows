@@ -36,6 +36,8 @@ public partial class NewTunnelWindow : Window
 
     async void GeneratePsk_Click(object sender, RoutedEventArgs e) => await _vm.GeneratePresharedKeyAsync();
 
+    void CopyPublicKey_Click(object sender, RoutedEventArgs e) => Copy(_vm.PublicKey, "Öffentlicher Schlüssel");
+
     void CopySnippet_Click(object sender, RoutedEventArgs e) => Copy(_vm.ServerSnippetForCopy(), "[Peer]-Block");
 
     void CopyInterface_Click(object sender, RoutedEventArgs e) => Copy(_vm.InterfaceSuggestion, "[Interface]-Vorschlag");
