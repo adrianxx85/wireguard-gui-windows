@@ -70,6 +70,10 @@ public sealed class MainVm : ObservableObject
         return Tunnels.Any(t => t.Name.Equals(sanitized, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Tunnel-Adressen aller bekannten Tunnel – der Assistent schlägt nur freie Netze vor.</summary>
+    public List<string> TunnelAddresses() =>
+        Tunnels.SelectMany(t => ConfigBuilder.SplitList(t.Original.Interface?.Get("Address"))).ToList();
+
     /// <summary>Legt einen Tunnel aus Konfigurationstext an (Import oder Assistent).</summary>
     /// <returns>Den Tunnel oder null, wenn der Benutzer das Überschreiben abgelehnt hat.</returns>
     public TunnelVm? Add(string requestedName, string text, Func<string, bool> confirmOverwrite)

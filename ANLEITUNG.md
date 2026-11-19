@@ -44,16 +44,29 @@ Voraussetzungen: Windows 10 oder 11 (64 Bit), Administratorrechte.
 4. Zum Trennen auf "Trennen" klicken.
 
 Neuen Tunnel erstellen (ohne .conf-Datei)
-  Der Assistent führt in drei Schritten zur fertigen Konfiguration:
-  1. Dieses Gerät: Name, Tunnel-Adresse (z. B. 10.8.0.2/32) und optional
-     DNS. Das Schlüsselpaar wird automatisch erzeugt; einen vorgegebenen
-     privaten Schlüssel kannst du stattdessen einfügen.
-  2. Server: öffentlicher Schlüssel des Servers, Endpoint (host:port),
-     optional ein Pre-shared Key, Routing (alles oder nur bestimmte Netze)
+  Der Assistent führt in vier Schritten zur fertigen Konfiguration:
+  1. Wofür ist der Tunnel?
+       - Gesamter Internetverkehr über das VPN (mit Kill-Switch)
+       - Zugriff auf ein entferntes Netzwerk (Point-to-Site), z. B. das
+         Heimnetz mit NAS und Drucker – Surfen geht weiter direkt
+       - Direktverbindung zu einem Gerät (Point-to-Point)
+  2. Dieses Gerät: Name, Tunnel-Adresse und DNS. Die Adresse wird aus
+     einem freien VPN-Netz vorgeschlagen, das sich nicht mit deinen
+     Netzwerken und vorhandenen Tunneln überschneidet ("Neu vorschlagen"
+     würfelt ein anderes). Hat dein Server schon ein VPN-Netz, trage die
+     Adresse ein, die er dir zugewiesen hat. Das Schlüsselpaar wird
+     automatisch erzeugt; einen vorgegebenen privaten Schlüssel kannst du
+     stattdessen einfügen.
+  3. Server bzw. Gegenstelle: öffentlicher Schlüssel, Endpoint (host:port),
+     je nach Art die Netze hinter dem Server oder die Tunnel-Adresse der
+     Gegenstelle (wird passend vorgeschlagen), optional Pre-shared Key
      und Keepalive.
-  3. Zusammenfassung: Der angezeigte [Peer]-Block muss in die Konfiguration
-     des WireGuard-Servers (Button "Kopieren"). Erst danach klappt das
-     Verbinden. Der private Schlüssel verlässt den PC dabei nicht.
+  4. Zusammenfassung: Der angezeigte [Peer]-Block muss in die Konfiguration
+     der Gegenstelle (Button "Kopieren"). Erst danach klappt das Verbinden.
+     Bei einem neu vorgeschlagenen VPN-Netz gibt es zusätzlich einen
+     Vorschlag für das [Interface] der Gegenstelle. Überschneidet sich ein
+     Tunnel-Netz mit deinem aktuellen lokalen Netz, warnt der Assistent.
+     Der private Schlüssel verlässt den PC dabei nicht.
      Später findest du den Block jederzeit wieder im Reiter "Konfiguration"
      unter "Server-Block kopieren".
 

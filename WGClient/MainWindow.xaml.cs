@@ -118,7 +118,7 @@ public partial class MainWindow : Window
 
     void NewTunnel_Click(object sender, RoutedEventArgs e)
     {
-        var wizard = new NewTunnelWindow(_vm.NameExists) { Owner = this };
+        var wizard = new NewTunnelWindow(_vm.NameExists, _vm.TunnelAddresses()) { Owner = this };
         if (wizard.ShowDialog() != true || wizard.Result is not { } result) return;
         try
         {

@@ -14,7 +14,7 @@
 ## Funktionen
 
 - **Import** von WireGuard-Konfigurationen per Button, Drag & Drop oder „Öffnen mit“
-- **Neuen Tunnel erstellen** per Assistent: Schlüsselpaar wird erzeugt, der passende `[Peer]`-Block für den Server zum Kopieren angezeigt
+- **Neuen Tunnel erstellen** per Assistent: Internet-VPN, Point-to-Site oder Point-to-Point – freie Tunnel-Adressen werden vorgeschlagen, das Schlüsselpaar erzeugt und der passende `[Peer]`-Block für die Gegenstelle zum Kopieren angezeigt
 - **Verbinden/Trennen** mit Live-Status: Handshake, empfangene/gesendete Daten, Endpoint
 - **Optionen ohne Datei-Bearbeitung**
   - DNS-Server festlegen und bei Änderungen fehlende Tunnelrouten ergänzen

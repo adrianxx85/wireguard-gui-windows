@@ -7,12 +7,11 @@ public partial class NewTunnelWindow : Window
 {
     readonly NewTunnelVm _vm;
 
-    public NewTunnelWindow(Func<string, bool> nameExists)
+    public NewTunnelWindow(Func<string, bool> nameExists, IEnumerable<string> tunnelAddresses)
     {
         InitializeComponent();
-        _vm = new NewTunnelVm(nameExists);
+        _vm = new NewTunnelVm(nameExists, tunnelAddresses);
         DataContext = _vm;
-        Loaded += (_, _) => NameBox.Focus();
     }
 
     /// <summary>Name und Konfiguration, wenn der Assistent mit "Tunnel erstellen" abgeschlossen wurde.</summary>
@@ -26,19 +25,27 @@ public partial class NewTunnelWindow : Window
 
     async void Next_Click(object sender, RoutedEventArgs e)
     {
-        if (await _vm.NextAsync()) DialogResult = true;
+        if (await _vm.NextAsync()) { DialogResult = true; return; }
+        if (_vm.IsStep1 && _vm.Name.Length == 0)
+            _ = Dispatcher.BeginInvoke(() => NameBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
     void Back_Click(object sender, RoutedEventArgs e) => _vm.Back();
 
+    void SuggestAddress_Click(object sender, RoutedEventArgs e) => _vm.SuggestAddress();
+
     async void GeneratePsk_Click(object sender, RoutedEventArgs e) => await _vm.GeneratePresharedKeyAsync();
 
-    void CopySnippet_Click(object sender, RoutedEventArgs e)
+    void CopySnippet_Click(object sender, RoutedEventArgs e) => Copy(_vm.ServerSnippet, "[Peer]-Block");
+
+    void CopyInterface_Click(object sender, RoutedEventArgs e) => Copy(_vm.InterfaceSuggestion, "[Interface]-Vorschlag");
+
+    void Copy(string text, string what)
     {
         try
         {
-            Clipboard.SetText(_vm.ServerSnippet);
-            _vm.Info = "Block in die Zwischenablage kopiert.";
+            Clipboard.SetText(text);
+            _vm.Info = $"{what} in die Zwischenablage kopiert.";
         }
         catch (Exception ex) { _vm.Error = "Kopieren fehlgeschlagen: " + ex.Message; }
     }

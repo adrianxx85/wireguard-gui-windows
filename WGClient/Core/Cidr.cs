@@ -34,6 +34,43 @@ public static class Cidr
         return true;
     }
 
+    /// <summary>Netzadresse, z. B. (192.168.1.37, 24) → "192.168.1.0/24".</summary>
+    public static string NetworkV4(IPAddress ip, int prefix)
+    {
+        var mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
+        return $"{FromUInt(ToUInt(ip) & mask)}/{prefix}";
+    }
+
+    /// <summary>Adresse im Netz mit Abstand <paramref name="offset"/> zur Netzadresse, z. B. ("10.8.0.0/24", 1) → "10.8.0.1".</summary>
+    public static string? HostV4(string subnet, uint offset) =>
+        TryParseV4(subnet, out var s, out var e) && offset <= e - s ? FromUInt(s + offset) : null;
+
+    public static bool OverlapsV4(string a, string b) =>
+        TryParseV4(a, out var s1, out var e1) && TryParseV4(b, out var s2, out var e2) && s1 <= e2 && s2 <= e1;
+
+    /// <summary>
+    /// Schlägt ein zufälliges privates /24 vor (bevorzugt 10.x.y.0, sonst 172.16–31.x.0 bzw. 192.168.x.0),
+    /// das sich mit keinem der belegten Netze überschneidet.
+    /// </summary>
+    public static string SuggestSubnetV4(IEnumerable<string> used, Random? random = null)
+    {
+        random ??= Random.Shared;
+        // Sehr große Bereiche (z. B. 0.0.0.0/0 aus AllowedIPs) würden jeden Vorschlag blockieren.
+        var blocked = used.Where(c => TryParseV4(c, out var s, out var e) && e - s <= 0x00FFFFFF).ToList();
+        bool Free(string candidate) => !blocked.Any(b => OverlapsV4(b, candidate));
+
+        Func<string>[] generators =
+        [
+            () => $"10.{random.Next(1, 255)}.{random.Next(0, 256)}.0/24",
+            () => $"172.{random.Next(16, 32)}.{random.Next(0, 256)}.0/24",
+            () => $"192.168.{random.Next(2, 255)}.0/24",
+        ];
+        foreach (var next in generators)
+            for (var i = 0; i < 300; i++)
+                if (next() is var candidate && Free(candidate)) return candidate;
+        return "10.199.99.0/24"; // praktisch alles belegt – Benutzer muss selbst wählen
+    }
+
     public static bool ContainsV4(IEnumerable<string> cidrs, IPAddress ip)
     {
         var a = ToUInt(ip);

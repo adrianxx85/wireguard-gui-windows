@@ -1,7 +1,7 @@
 <Window x:Class="WGClient.NewTunnelWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Neuen Tunnel erstellen" Width="640" Height="700" MinWidth="560" MinHeight="560"
+        Title="Neuen Tunnel erstellen" Width="660" Height="720" MinWidth="560" MinHeight="560"
         Icon="pack://application:,,,/Assets/app.ico"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
@@ -14,6 +14,11 @@
         <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource Muted}">
             <Setter Property="Margin" Value="0,5,0,14"/>
         </Style>
+        <Style x:Key="SubHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
     </Window.Resources>
 
     <DockPanel>
@@ -23,10 +28,11 @@
             <StackPanel>
                 <TextBlock Text="{Binding StepCaption}" Style="{StaticResource Muted}"/>
                 <TextBlock Text="{Binding StepTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,2,0,0"/>
-                <UniformGrid Columns="3" Margin="0,12,0,0">
+                <UniformGrid Columns="4" Margin="0,12,0,0">
                     <Border Height="3" CornerRadius="2" Margin="0,0,4,0" Background="{Binding Bar1}"/>
                     <Border Height="3" CornerRadius="2" Margin="2,0,2,0" Background="{Binding Bar2}"/>
-                    <Border Height="3" CornerRadius="2" Margin="4,0,0,0" Background="{Binding Bar3}"/>
+                    <Border Height="3" CornerRadius="2" Margin="2,0,2,0" Background="{Binding Bar3}"/>
+                    <Border Height="3" CornerRadius="2" Margin="4,0,0,0" Background="{Binding Bar4}"/>
                 </UniformGrid>
             </StackPanel>
         </Border>
@@ -50,6 +56,35 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <Grid Margin="28,20,28,20">
 
+                <!-- ===== Schritt 0: Art der Verbindung ===== -->
+                <StackPanel Visibility="{Binding IsStep0, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,14" FontSize="13"
+                               Text="Je nach Zweck schlägt der Assistent passende Adressen und Routen vor. Alles lässt sich später unter „Optionen“ anpassen."/>
+                    <RadioButton IsChecked="{Binding IsInternet}">
+                        <StackPanel>
+                            <TextBlock Text="Gesamten Internetverkehr über das VPN" FontWeight="SemiBold"/>
+                            <TextBlock Style="{StaticResource Muted}"
+                                       Text="Z. B. im öffentlichen WLAN oder für mehr Privatsphäre: alles läuft über den Server (eigener VPS, Router zuhause). Mit Kill-Switch."/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton IsChecked="{Binding IsSite}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Zugriff auf ein entferntes Netzwerk (Point-to-Site)" FontWeight="SemiBold"/>
+                            <TextBlock Style="{StaticResource Muted}"
+                                       Text="Ins Heim- oder Firmennetz: NAS, Drucker, Server. Normales Surfen geht weiter direkt ins Internet (Split-Tunnel)."/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton IsChecked="{Binding IsPointToPoint}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Direktverbindung zu einem Gerät (Point-to-Point)" FontWeight="SemiBold"/>
+                            <TextBlock Style="{StaticResource Muted}"
+                                       Text="Nur dieses Gerät und die Gegenstelle sprechen miteinander – z. B. PC ↔ Server oder PC ↔ PC."/>
+                        </StackPanel>
+                    </RadioButton>
+                    <TextBlock Style="{StaticResource Muted}" Margin="2,14,0,0"
+                               Text="Netz-zu-Netz-Kopplungen (Site-to-Site) richtet man meist direkt auf den Routern ein – dafür ist dieser Assistent nicht gedacht."/>
+                </StackPanel>
+
                 <!-- ===== Schritt 1: dieses Gerät ===== -->
                 <StackPanel Visibility="{Binding IsStep1, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Name" Style="{StaticResource FieldLabel}"/>
@@ -57,18 +92,19 @@
                     <TextBlock Text="{Binding NameHint}" Style="{StaticResource Hint}"/>
 
                     <TextBlock Text="Tunnel-Adresse dieses Geräts" Style="{StaticResource FieldLabel}"/>
-                    <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="Die IP-Adresse im VPN, z. B. 10.8.0.2/32 – bekommst du vom Server-Betreiber. Mehrere mit Komma trennen (z. B. zusätzlich IPv6)."/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Neu vorschlagen" Margin="8,0,0,0" Click="SuggestAddress_Click"/>
+                        <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding AddressHint}" Style="{StaticResource Hint}"/>
 
-                    <TextBlock Text="DNS-Server (optional)" Style="{StaticResource FieldLabel}"/>
+                    <TextBlock Text="DNS-Server" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding Dns, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="z. B. 10.8.0.1 oder 1.1.1.1. Leer lassen = DNS von Windows verwenden."/>
+                    <TextBlock Text="{Binding DnsHint}" Style="{StaticResource Hint}"/>
 
                     <TextBlock Text="Schlüssel" Style="{StaticResource SectionHeader}" Margin="0,8,0,8"/>
                     <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,12"
-                               Text="Für dieses Gerät wird automatisch ein neues Schlüsselpaar erzeugt. Der private Schlüssel bleibt auf diesem PC – an den Server geht nur der öffentliche."/>
+                               Text="Für dieses Gerät wird automatisch ein neues Schlüsselpaar erzeugt. Der private Schlüssel bleibt auf diesem PC – an die Gegenstelle geht nur der öffentliche."/>
                     <CheckBox IsChecked="{Binding UseOwnKey}">
                         <StackPanel>
                             <TextBlock Text="Vorhandenen privaten Schlüssel verwenden"/>
@@ -79,43 +115,44 @@
                              Visibility="{Binding UseOwnKey, Converter={StaticResource BoolToVis}}"/>
                 </StackPanel>
 
-                <!-- ===== Schritt 2: Server ===== -->
+                <!-- ===== Schritt 2: Server / Gegenstelle ===== -->
                 <StackPanel Visibility="{Binding IsStep2, Converter={StaticResource BoolToVis}}">
-                    <TextBlock Text="Öffentlicher Schlüssel des Servers" Style="{StaticResource FieldLabel}"/>
+                    <TextBlock Text="{Binding PeerKeyLabel}" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding ServerPublicKey, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource KeyBox}"/>
-                    <TextBlock Style="{StaticResource Hint}" Text="44 Zeichen, endet auf „=“. Steht in der Server-Konfiguration bzw. kommt vom Server-Betreiber."/>
+                    <TextBlock Style="{StaticResource Hint}" Text="44 Zeichen, endet auf „=“. Steht in deren WireGuard-Konfiguration bzw. kommt vom Betreiber."/>
 
-                    <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}"/>
+                    <TextBlock Text="{Binding EndpointLabel}" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
-                    <TextBlock Style="{StaticResource Hint}" Text="Adresse und Port des Servers, z. B. vpn.example.com:51820 (Standardport von WireGuard ist 51820)."/>
+                    <TextBlock Style="{StaticResource Hint}" Text="Öffentliche Adresse und Port, z. B. vpn.example.com:51820 (Standardport von WireGuard ist 51820)."/>
+
+                    <!-- Point-to-Site -->
+                    <StackPanel Visibility="{Binding IsSite, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Netze hinter dem Server" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding RemoteNetworks, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Das Heim- oder Firmennetz, z. B. 192.168.178.0/24 (FRITZ!Box) oder 192.168.1.0/24. Mehrere mit Komma trennen."/>
+                        <TextBlock Text="VPN-Netz" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding VpnSubnet, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Aus deiner Tunnel-Adresse abgeleitet – damit erreichst du auch den Server und andere VPN-Teilnehmer. Leer lassen, wenn nicht gewünscht."/>
+                    </StackPanel>
+
+                    <!-- Point-to-Point -->
+                    <StackPanel Visibility="{Binding IsPointToPoint, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Tunnel-Adresse der Gegenstelle" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding PeerAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Vorschlag passend zu deiner Adresse. Nur diese Adresse wird durch den Tunnel geroutet."/>
+                    </StackPanel>
 
                     <TextBlock Text="Pre-shared Key (optional)" Style="{StaticResource FieldLabel}"/>
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Content="Erzeugen" Margin="8,0,0,0" Click="GeneratePsk_Click" IsEnabled="{Binding IsIdle}"/>
                         <TextBox Text="{Binding PresharedKey, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource KeyBox}"/>
                     </DockPanel>
-                    <TextBlock Style="{StaticResource Hint}" Text="Zusätzliche Absicherung. Muss auf dem Server identisch eingetragen sein – sonst leer lassen."/>
+                    <TextBlock Style="{StaticResource Hint}" Text="Zusätzliche Absicherung. Muss auf der Gegenstelle identisch eingetragen sein – sonst leer lassen."/>
 
-                    <TextBlock Text="Routing" Style="{StaticResource SectionHeader}" Margin="0,8,0,10"/>
-                    <RadioButton IsChecked="{Binding IsFullTunnel}">
-                        <StackPanel>
-                            <TextBlock Text="Gesamten Traffic durch den Tunnel leiten" FontWeight="SemiBold"/>
-                            <TextBlock Style="{StaticResource Muted}" Text="Internet und alle Netze laufen über den Server (0.0.0.0/0, ::/0). Kill-Switch ist aktiv."/>
-                        </StackPanel>
-                    </RadioButton>
-                    <RadioButton IsChecked="{Binding IsSplit}" Margin="0,8,0,0">
-                        <StackPanel>
-                            <TextBlock Text="Nur bestimmte Netze (Split-Tunnel)" FontWeight="SemiBold"/>
-                            <TextBlock Style="{StaticResource Muted}" Text="Nur die angegebenen Netze gehen durch den Tunnel, alles andere direkt ins Internet."/>
-                        </StackPanel>
-                    </RadioButton>
-                    <StackPanel Margin="4,12,0,0" Visibility="{Binding IsSplit, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="Netze (AllowedIPs), durch Komma getrennt:" Style="{StaticResource FieldLabel}"/>
-                        <TextBox Text="{Binding SplitAllowedIps, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
-                        <TextBlock Style="{StaticResource Hint}" Text="z. B. 10.8.0.0/24, 192.168.0.0/24 (VPN-Netz und Heimnetz hinter dem Server)."/>
-                    </StackPanel>
-
-                    <TextBlock Text="Keepalive (Sekunden)" Style="{StaticResource FieldLabel}" Margin="0,14,0,5"/>
+                    <TextBlock Text="Keepalive (Sekunden)" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding Keepalive, UpdateSourceTrigger=PropertyChanged}" Width="110" HorizontalAlignment="Left"/>
                     <TextBlock Style="{StaticResource Hint}" Text="Hält die Verbindung hinter Routern offen. 25 ist ein guter Wert, leer oder 0 = aus."/>
                 </StackPanel>
@@ -124,22 +161,38 @@
                 <StackPanel Visibility="{Binding IsStep3, Converter={StaticResource BoolToVis}}">
                     <Border Background="#16263F" BorderBrush="#2B4A7A" BorderThickness="1" CornerRadius="8" Padding="14,12">
                         <TextBlock TextWrapping="Wrap" Foreground="#CFE0FF"
-                                   Text="Fast geschafft! Trage den folgenden Block in die Konfiguration des WireGuard-Servers ein (oder schicke ihn dem Server-Betreiber). Erst danach kann die Verbindung aufgebaut werden."/>
+                                   Text="Fast geschafft! Trage den folgenden Block in die WireGuard-Konfiguration der Gegenstelle ein (oder schicke ihn dem Betreiber). Erst danach kann die Verbindung aufgebaut werden."/>
+                    </Border>
+
+                    <Border Background="#3A2A12" BorderBrush="#6A4A1E" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,10,0,0"
+                            Visibility="{Binding HasWarning, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding Warning}" TextWrapping="Wrap" Foreground="#F5C27A"/>
                     </Border>
 
                     <DockPanel Margin="0,18,0,8">
                         <Button DockPanel.Dock="Right" Content="Kopieren" Click="CopySnippet_Click"/>
-                        <TextBlock Text="Für den Server" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock Text="[Peer]-Block für die Gegenstelle" Style="{StaticResource SubHeader}"/>
                     </DockPanel>
                     <TextBox Text="{Binding ServerSnippet, Mode=OneWay}" Style="{StaticResource CodeBox}" MinHeight="96"/>
+                    <TextBlock Text="{Binding ServerHint}" Style="{StaticResource Hint}"/>
 
-                    <TextBlock Text="Öffentlicher Schlüssel dieses Geräts" Style="{StaticResource FieldLabel}" Margin="0,14,0,5"/>
+                    <StackPanel Visibility="{Binding HasInterfaceSuggestion, Converter={StaticResource BoolToVis}}">
+                        <DockPanel Margin="0,4,0,8">
+                            <Button DockPanel.Dock="Right" Content="Kopieren" Click="CopyInterface_Click"/>
+                            <TextBlock Text="Neues VPN-Netz: Vorschlag für das [Interface] der Gegenstelle" Style="{StaticResource SubHeader}"/>
+                        </DockPanel>
+                        <TextBox Text="{Binding InterfaceSuggestion, Mode=OneWay}" Style="{StaticResource CodeBox}"/>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Nur nötig, wenn die Gegenstelle neu eingerichtet wird. Den privaten Schlüssel erzeugt die Gegenstelle selbst (z. B. wg genkey)."/>
+                    </StackPanel>
+
+                    <TextBlock Text="Öffentlicher Schlüssel dieses Geräts" Style="{StaticResource FieldLabel}" Margin="0,4,0,5"/>
                     <TextBox Text="{Binding PublicKey, Mode=OneWay}" Style="{StaticResource KeyBox}" IsReadOnly="True"/>
 
-                    <TextBlock Text="Konfiguration dieses Geräts" FontSize="14" FontWeight="SemiBold" Margin="0,18,0,8"/>
+                    <TextBlock Text="Konfiguration dieses Geräts" Style="{StaticResource SubHeader}" Margin="0,18,0,8"/>
                     <TextBox Text="{Binding ConfigPreview, Mode=OneWay}" Style="{StaticResource CodeBox}" MaxHeight="230"/>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Private Schlüssel sind ausgeblendet. Kill-Switch, LAN-Zugriff, Autostart usw. stellst du nach dem Erstellen im Reiter „Optionen“ ein."/>
+                               Text="Private Schlüssel sind ausgeblendet. Den [Peer]-Block findest du später auch im Reiter „Konfiguration“ unter „Server-Block kopieren“."/>
                 </StackPanel>
             </Grid>
         </ScrollViewer>
