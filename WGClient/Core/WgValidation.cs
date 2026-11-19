@@ -1,3 +1,7 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+
 namespace WGClient.Core;
 
 public static class WgValidation
@@ -16,8 +20,23 @@ public static class WgValidation
     {
         var ep = endpoint?.Trim() ?? "";
         var colon = ep.LastIndexOf(':');
-        if (colon <= 0 || !int.TryParse(ep[(colon + 1)..], out var port) || port is < 1 or > 65535) return false;
+        if (colon <= 0 || ep.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))) return false;
+        var portText = ep.AsSpan(colon + 1);
+        if (portText.IsEmpty || portText.ContainsAnyExceptInRange('0', '9') ||
+            !ushort.TryParse(portText, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port == 0) return false;
+
         var host = ep[..colon];
-        return host.StartsWith('[') ? host.EndsWith(']') && host.Length > 2 : !host.Contains(':');
+        if (!host.StartsWith('['))
+            return !host.Contains(':') && Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.IPv4;
+        if (!host.EndsWith(']')) return false;
+        var literal = host.AsSpan(1, host.Length - 2);
+        var scope = literal.IndexOf('%');
+        if (scope >= 0)
+        {
+            var zone = literal[(scope + 1)..];
+            if (zone.IsEmpty || zone.ContainsAny('%', '[', ']') || zone.Contains('#')) return false;
+            literal = literal[..scope];
+        }
+        return IPAddress.TryParse(literal, out var ip) && ip.AddressFamily == AddressFamily.InterNetworkV6;
     }
 }

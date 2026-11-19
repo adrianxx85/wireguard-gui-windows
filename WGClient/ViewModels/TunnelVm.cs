@@ -5,6 +5,8 @@ using WGClient.Core;
 
 namespace WGClient.ViewModels;
 
+public sealed record ServerPeerChoice(WgSection Peer, string Label);
+
 public sealed class TunnelVm : ObservableObject
 {
     static readonly Brush Green = Freeze(Color.FromRgb(0x2E, 0xCC, 0x71));
@@ -20,12 +22,36 @@ public sealed class TunnelVm : ObservableObject
         Name = name;
         Original = original;
         Saved = options;
+        LoadServerPeers();
         LoadEdit(options);
     }
 
     public string Name { get; }
     public WgConfig Original { get; private set; }
     public TunnelOptions Saved { get; private set; }
+
+    public IReadOnlyList<ServerPeerChoice> ServerPeers { get; private set; } = [];
+    public bool HasMultipleServerPeers => ServerPeers.Count > 1;
+    public bool CanCopyServerPeer => SelectedServerPeer is not null;
+
+    ServerPeerChoice? _selectedServerPeer;
+    public ServerPeerChoice? SelectedServerPeer
+    {
+        get => _selectedServerPeer;
+        set { if (Set(ref _selectedServerPeer, value)) OnPropertyChanged(nameof(CanCopyServerPeer)); }
+    }
+
+    void LoadServerPeers()
+    {
+        ServerPeers = Original.Peers.Select((peer, index) =>
+        {
+            var endpoint = peer.Get("Endpoint");
+            var label = $"Peer {index + 1} · {peer.Get("PublicKey")}";
+            return new ServerPeerChoice(peer, endpoint is null ? label : $"{label} · {endpoint}");
+        }).ToList();
+        OnPropertyChanged(nameof(ServerPeers), nameof(HasMultipleServerPeers));
+        SelectedServerPeer = ServerPeers.Count == 1 ? ServerPeers[0] : null;
+    }
 
     // ---------- Laufzeitstatus ----------
 
@@ -282,6 +308,7 @@ public sealed class TunnelVm : ObservableObject
     public void ReplaceOriginal(WgConfig cfg, TunnelOptions options)
     {
         Original = cfg;
+        LoadServerPeers();
         ApplySaved(options);
         LoadEdit(options);
         OnPropertyChanged(nameof(AddressText), nameof(PeerCountText), nameof(KillSwitchEnabled), nameof(UsesManualRoutes));

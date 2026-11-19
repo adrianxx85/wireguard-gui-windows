@@ -5,10 +5,12 @@ namespace WGClient.Core;
 
 public static class Cidr
 {
+    static readonly string[] PrivateV4Ranges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+
     /// <summary>Private/lokale IPv4-Bereiche, die bei "LAN erreichbar" am Tunnel vorbei geroutet werden.</summary>
     public static readonly string[] LocalV4Ranges =
     [
-        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", // privat + link-local
+        ..PrivateV4Ranges, "169.254.0.0/16",                                 // privat + link-local
         "224.0.0.0/4", "255.255.255.255/32"                                 // Multicast/Broadcast (Discovery, mDNS …)
     ];
 
@@ -49,26 +51,29 @@ public static class Cidr
         TryParseV4(a, out var s1, out var e1) && TryParseV4(b, out var s2, out var e2) && s1 <= e2 && s2 <= e1;
 
     /// <summary>
-    /// Schlägt ein zufälliges privates /24 vor (bevorzugt 10.x.y.0, sonst 172.16–31.x.0 bzw. 192.168.x.0),
-    /// das sich mit keinem der belegten Netze überschneidet.
+    /// Schlägt ein freies privates /24 vor, bevorzugt unter 10.0.0.0/8.
     /// </summary>
-    public static string SuggestSubnetV4(IEnumerable<string> used, Random? random = null)
+    public static string? SuggestSubnetV4(IEnumerable<string> used, Random? random = null)
     {
         random ??= Random.Shared;
-        // Sehr große Bereiche (z. B. 0.0.0.0/0 aus AllowedIPs) würden jeden Vorschlag blockieren.
-        var blocked = used.Where(c => TryParseV4(c, out var s, out var e) && e - s <= 0x00FFFFFF).ToList();
-        bool Free(string candidate) => !blocked.Any(b => OverlapsV4(b, candidate));
+        var blocked = new List<(uint First, uint Last)>();
+        foreach (var address in used)
+            if (TryParseV4(address, out var start, out var end)) blocked.Add((start >> 8, end >> 8));
 
-        Func<string>[] generators =
-        [
-            () => $"10.{random.Next(1, 255)}.{random.Next(0, 256)}.0/24",
-            () => $"172.{random.Next(16, 32)}.{random.Next(0, 256)}.0/24",
-            () => $"192.168.{random.Next(2, 255)}.0/24",
-        ];
-        foreach (var next in generators)
-            for (var i = 0; i < 300; i++)
-                if (next() is var candidate && Free(candidate)) return candidate;
-        return "10.199.99.0/24"; // praktisch alles belegt – Benutzer muss selbst wählen
+        foreach (var pool in PrivateV4Ranges)
+        {
+            if (!TryParseV4(pool, out var start, out var end)) continue;
+            var first = start >> 8;
+            var count = (int)((end >> 8) - first + 1);
+            var offset = random.Next(count);
+            for (var i = 0; i < count; i++)
+            {
+                var candidate = first + (uint)((offset + i) % count);
+                if (!blocked.Any(range => candidate >= range.First && candidate <= range.Last))
+                    return $"{FromUInt(candidate << 8)}/24";
+            }
+        }
+        return null;
     }
 
     public static bool ContainsV4(IEnumerable<string> cidrs, IPAddress ip)

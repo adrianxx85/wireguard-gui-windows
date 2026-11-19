@@ -97,7 +97,9 @@ public partial class MainWindow : Window
     void UpdateTray()
     {
         var active = _vm.Tunnels.Where(t => t.IsActive).Select(t => t.Name).ToList();
-        _tray?.SetStatus(active.Count > 0, active.Count > 0 ? "WG Client – " + string.Join(", ", active) : "WG Client – getrennt");
+        var stopping = _vm.Tunnels.Any(t => t.State == Core.TunnelState.Stopping);
+        var status = active.Count > 0 ? string.Join(", ", active) : stopping ? "Trenne …" : "getrennt";
+        _tray?.SetStatus(active.Count > 0 || stopping, "WG Client – " + status);
     }
 
     void Coffee_Click(object sender, RoutedEventArgs e) => App.OpenUrl(App.CoffeeUrl);
@@ -197,10 +199,13 @@ public partial class MainWindow : Window
 
     async void CopyServerPeer_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm.Selected is not { } t) return;
+        if (_vm.Selected is not { SelectedServerPeer: { } selectedPeer } t) return;
+        var original = t.Original;
         try
         {
-            Clipboard.SetText(await Core.ServerPeer.SnippetAsync(t.Name, t.Original));
+            var snippet = await Core.ServerPeer.SnippetAsync(t.Name, original, selectedPeer.Peer);
+            if (_vm.Selected != t || t.Original != original || t.SelectedServerPeer != selectedPeer) return;
+            PrivateClipboard.SetText(snippet);
             _vm.StatusMessage = $"[Peer]-Block für \"{t.Name}\" in die Zwischenablage kopiert – auf dem Server eintragen.";
         }
         catch (Exception ex) { ShowError("Server-Block konnte nicht erstellt werden", ex); }

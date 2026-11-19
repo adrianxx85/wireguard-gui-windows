@@ -41,7 +41,8 @@ Voraussetzungen: Windows 10 oder 11 (64 Bit), Administratorrechte.
      grün  = verbunden (Handshake mit dem Server erfolgreich)
      gelb  = Tunnel aktiv, wartet auf Antwort vom Server
      grau  = getrennt
-4. Zum Trennen auf "Trennen" klicken.
+4. Zum Trennen auf "Trennen" klicken. WG Client wartet, bis Windows den
+   Dienststopp bestätigt. Beim Entfernen werden die Profildateien danach gelöscht.
 
 Neuen Tunnel erstellen (ohne .conf-Datei)
   Der Assistent führt in vier Schritten zur fertigen Konfiguration:
@@ -50,23 +51,24 @@ Neuen Tunnel erstellen (ohne .conf-Datei)
        - Zugriff auf ein entferntes Netzwerk (Point-to-Site), z. B. das
          Heimnetz mit NAS und Drucker – Surfen geht weiter direkt
        - Direktverbindung zu einem Gerät (Point-to-Point)
-  2. Dieses Gerät: Name, Tunnel-Adresse und DNS. Die Adresse wird aus
-     einem freien VPN-Netz vorgeschlagen, das sich nicht mit deinen
-     Netzwerken und vorhandenen Tunneln überschneidet ("Neu vorschlagen"
-     würfelt ein anderes). Hat dein Server schon ein VPN-Netz, trage die
-     Adresse ein, die er dir zugewiesen hat. Das Schlüsselpaar wird
-     automatisch erzeugt; einen vorgegebenen privaten Schlüssel kannst du
-     stattdessen einfügen.
-  3. Server bzw. Gegenstelle: öffentlicher Schlüssel, Endpoint (host:port),
-     je nach Art die Netze hinter dem Server oder die Tunnel-Adresse der
-     Gegenstelle (wird passend vorgeschlagen), optional Pre-shared Key
-     und Keepalive.
-  4. Zusammenfassung: Der angezeigte [Peer]-Block muss in die Konfiguration
-     der Gegenstelle (Button "Kopieren"). Erst danach klappt das Verbinden.
-     Bei einem neu vorgeschlagenen VPN-Netz gibt es zusätzlich einen
-     Vorschlag für das [Interface] der Gegenstelle. Überschneidet sich ein
-     Tunnel-Netz mit deinem aktuellen lokalen Netz, warnt der Assistent.
-     Der private Schlüssel verlässt den PC dabei nicht.
+  2. Dieses Gerät: Name, Tunnel-Adresse und DNS. Der Assistent sucht ein
+     privates IPv4-Netz, das sich weder mit aktiven lokalen Netzen noch mit
+     Adressen vorhandener Tunnel überschneidet. Ist keines frei oder hat dir
+     der Server bereits eine Adresse zugewiesen, trage sie manuell ein.
+     Das Schlüsselpaar wird automatisch erzeugt. Einen vorgegebenen privaten
+     Schlüssel kannst du stattdessen einfügen.
+  3. Server bzw. Gegenstelle: öffentlicher Schlüssel, Endpoint (host:port
+     oder [IPv6-Adresse]:port), optional Pre-shared Key und Keepalive.
+     Für Point-to-Site gib die Netze hinter dem Server ein. Für Point-to-Point
+     gib eine einzelne Gegenstellenadresse an, optional mit /32 (IPv4) oder
+     /128 (IPv6). Beide Geräte brauchen verschiedene Adressen derselben Familie.
+  4. Zusammenfassung: Übernimm den [Peer]-Block per "Kopieren" in die
+     Konfiguration der Gegenstelle. Die Vorschau verdeckt den optionalen
+     Pre-shared Key. Der vollständige Block landet beim Kopieren in der
+     Zwischenablage, ohne im Windows-Verlauf oder in der Synchronisierung
+     gespeichert zu werden. Wenn die Angaben zum vorgeschlagenen VPN-Netz
+     passen, zeigt der Assistent zusätzlich einen [Interface]-Vorschlag.
+     Bei Überschneidungen mit aktiven lokalen IPv4-Netzen warnt er.
      Später findest du den Block jederzeit wieder im Reiter "Konfiguration"
      unter "Server-Block kopieren".
 
@@ -85,8 +87,12 @@ Optionen
 Konfiguration
   Zeigt die Konfiguration, mit der der Tunnel tatsächlich gestartet wird
   (private Schlüssel ausgeblendet). "Exportieren" speichert sie als .conf.
-  "Server-Block kopieren" kopiert den [Peer]-Block mit dem öffentlichen
-  Schlüssel dieses Geräts – zum Eintragen auf dem WireGuard-Server.
+  "Server-Block kopieren" kopiert den [Peer]-Block für den WireGuard-Server.
+  Hat das Profil mehrere Peers, wähle zuerst die Gegenstelle anhand ihres
+  öffentlichen Schlüssels oder Endpoints. Der Block enthält den öffentlichen
+  Schlüssel dieses Geräts und den optionalen Pre-shared Key der gewählten
+  Gegenstelle. Die App schließt den Block vom Windows-Zwischenablageverlauf
+  und der Synchronisierung aus.
 
 Log
   Das WireGuard-Protokoll – hilfreich, wenn eine Verbindung nicht klappt.

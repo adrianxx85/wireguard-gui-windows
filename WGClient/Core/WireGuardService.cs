@@ -24,7 +24,7 @@ public static class WireGuardService
     {
         NativeServices.Status.Running => TunnelState.Running,
         NativeServices.Status.StartPending or NativeServices.Status.ContinuePending => TunnelState.Starting,
-        NativeServices.Status.StopPending => TunnelState.Stopping,
+        NativeServices.Status.StopPending or NativeServices.Status.MarkedForDeletion => TunnelState.Stopping,
         _ => TunnelState.Disconnected, // gestoppt oder Dienst existiert nicht
     };
 
@@ -105,14 +105,20 @@ public static class WireGuardService
     public static async Task DisconnectAsync(string tunnel)
     {
         if (!IsOwned(tunnel)) return;
-        EnsureInstalled();
-        var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
-        if (code != 0)
-            throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
-        // Hält ein anderes Programm noch ein Dienst-Handle, bleibt der Eintrag als "zum Löschen markiert" bestehen.
-        // Der Tunnel ist dann trotzdem getrennt – gestoppt genügt hier.
-        if (!await WaitUntilAsync(() => !IsOwned(tunnel) ||
-                NativeServices.Query(ServiceName(tunnel)) is null or NativeServices.Status.Stopped, RemoveTimeout))
+        // Ein vorhandenes Handle bleibt zur Statusabfrage gültig, wenn WireGuard den Dienst zum Löschen markiert.
+        using var service = NativeServices.OpenForQuery(ServiceName(tunnel), out var markedForDeletion);
+        if (service is not null)
+        {
+            EnsureInstalled();
+            var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
+            if (code != 0)
+                throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
+        }
+        else if (!markedForDeletion) return;
+
+        if (!await WaitUntilAsync(() => service is not null
+                ? service.QueryStatus() == NativeServices.Status.Stopped
+                : !IsServiceInstalled(tunnel), RemoveTimeout))
             throw new TimeoutException($"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestoppt.");
     }
 

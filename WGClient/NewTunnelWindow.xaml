@@ -142,7 +142,7 @@
                         <TextBlock Text="Tunnel-Adresse der Gegenstelle" Style="{StaticResource FieldLabel}"/>
                         <TextBox Text="{Binding PeerAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"/>
                         <TextBlock Style="{StaticResource Hint}"
-                                   Text="Vorschlag passend zu deiner Adresse. Nur diese Adresse wird durch den Tunnel geroutet."/>
+                                   Text="Eine einzelne IPv4- oder IPv6-Adresse. Optionales Präfix: /32 für IPv4 oder /128 für IPv6."/>
                     </StackPanel>
 
                     <TextBlock Text="Pre-shared Key (optional)" Style="{StaticResource FieldLabel}"/>
@@ -192,7 +192,7 @@
                     <TextBlock Text="Konfiguration dieses Geräts" Style="{StaticResource SubHeader}" Margin="0,18,0,8"/>
                     <TextBox Text="{Binding ConfigPreview, Mode=OneWay}" Style="{StaticResource CodeBox}" MaxHeight="230"/>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Private Schlüssel sind ausgeblendet. Den [Peer]-Block findest du später auch im Reiter „Konfiguration“ unter „Server-Block kopieren“."/>
+                               Text="Schlüssel bleiben in der Vorschau ausgeblendet. „Kopieren“ übernimmt den vollständigen [Peer]-Block und schließt ihn vom Windows-Zwischenablageverlauf und der Synchronisierung aus."/>
                 </StackPanel>
             </Grid>
         </ScrollViewer>

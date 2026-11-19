@@ -26,7 +26,8 @@ public sealed class NewTunnelVm : ObservableObject
     string? _generatedKey; // automatisch erzeugter Schlüssel (bleibt beim Hin- und Herblättern gleich)
 
     // Zuletzt automatisch eingetragene Werte – nur diese werden bei Änderungen nachgeführt.
-    string _suggestedAddress = "", _autoDns = "", _autoVpnSubnet = "", _autoPeerAddress = "";
+    string? _suggestedAddress, _suggestedSubnet;
+    string _autoDns = "", _autoVpnSubnet = "", _autoPeerAddress = "";
 
     public NewTunnelVm(Func<string, bool> nameExists, IEnumerable<string> tunnelAddresses, IEnumerable<string>? localNetworks = null)
     {
@@ -126,12 +127,11 @@ public sealed class NewTunnelVm : ObservableObject
     public string Address { get => _address; set { if (Set(ref _address, value)) OnPropertyChanged(nameof(AddressHint)); } }
 
     public string AddressHint => IsSuggestedAddress
-        ? $"Vorschlag aus einem freien VPN-Netz ({SuggestedSubnet}) – überschneidet sich nicht mit deinen Netzen. " +
+        ? $"Vorschlag aus einem freien VPN-Netz ({_suggestedSubnet}). " +
           "Hat der Server schon ein VPN-Netz, trage stattdessen die Adresse ein, die er dir zugewiesen hat."
         : "Die IP-Adresse dieses Geräts im VPN, z. B. 10.8.0.2/32. Mehrere mit Komma trennen (z. B. zusätzlich IPv6).";
 
-    bool IsSuggestedAddress => ConfigBuilder.SplitList(Address).SequenceEqual([_suggestedAddress]);
-    string SuggestedSubnet => Cidr.NetworkV4(IPAddress.Parse(_suggestedAddress.Split('/')[0]), 24);
+    bool IsSuggestedAddress => _suggestedAddress is not null && ConfigBuilder.SplitList(Address).SequenceEqual([_suggestedAddress]);
 
     string _dns = "";
     public string Dns { get => _dns; set => Set(ref _dns, value); }
@@ -199,6 +199,13 @@ public sealed class NewTunnelVm : ObservableObject
     public void SuggestAddress()
     {
         var subnet = Cidr.SuggestSubnetV4(_usedNetworks);
+        if (subnet is null)
+        {
+            Info = "Kein freies privates IPv4-Netz gefunden. Bitte die Tunnel-Adresse manuell eingeben.";
+            return;
+        }
+        Info = null;
+        _suggestedSubnet = subnet;
         _suggestedAddress = Cidr.HostV4(subnet, 2) + "/32";
         Address = _suggestedAddress;
         OnPropertyChanged(nameof(AddressHint));
@@ -274,7 +281,7 @@ public sealed class NewTunnelVm : ObservableObject
     /// <summary>VPN-Netz und Adresse der Gegenstelle aus der Adresse dieses Geräts ableiten (Konvention: /24, Gegenstelle .1).</summary>
     void ApplyPeerDefaults()
     {
-        if (DeviceIPv4() is not { } ip) return;
+        if (DeviceAddresses().FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork) is not { } ip) return;
         var subnet = Cidr.NetworkV4(ip, 24);
         if (VpnSubnet.Trim().Length == 0 || VpnSubnet == _autoVpnSubnet) VpnSubnet = subnet;
         _autoVpnSubnet = subnet;
@@ -284,9 +291,8 @@ public sealed class NewTunnelVm : ObservableObject
         _autoPeerAddress = peer;
     }
 
-    IPAddress? DeviceIPv4() => ConfigBuilder.SplitList(Address)
-        .Select(a => IPAddress.TryParse(a.Split('/')[0], out var ip) ? ip : null)
-        .FirstOrDefault(ip => ip?.AddressFamily == AddressFamily.InterNetwork);
+    IEnumerable<IPAddress> DeviceAddresses() => ConfigBuilder.SplitList(Address)
+        .Select(a => IPAddress.TryParse(a.Split('/')[0], out var ip) ? ip : null).OfType<IPAddress>();
 
     // ---------- Prüfung ----------
 
@@ -330,9 +336,13 @@ public sealed class NewTunnelVm : ObservableObject
         {
             var peer = PeerAddress.Trim();
             if (peer.Length == 0) return "Bitte die Tunnel-Adresse der Gegenstelle angeben (z. B. 10.8.0.1).";
-            if (!Cidr.IsValid(peer)) return $"Ungültige Adresse der Gegenstelle: {peer}";
-            if (DeviceIPv4() is { } own && peer.Split('/')[0] == own.ToString())
+            if (!TryPeerHost(peer, out var ip))
+                return "Für Point-to-Point eine einzelne IP-Adresse der Gegenstelle eingeben. Erlaubte Präfixe sind /32 für IPv4 und /128 für IPv6.";
+            var devices = DeviceAddresses().ToList();
+            if (devices.Contains(ip))
                 return "Die Gegenstelle braucht eine andere Tunnel-Adresse als dieses Gerät.";
+            if (!devices.Any(device => device.AddressFamily == ip.AddressFamily))
+                return "Dieses Gerät braucht eine Tunnel-Adresse derselben Adressfamilie wie die Gegenstelle (IPv4 oder IPv6).";
         }
 
         if (Keepalive.Trim().Length > 0 && (!int.TryParse(Keepalive.Trim(), out var k) || k is < 0 or > 65535))
@@ -361,12 +371,19 @@ public sealed class NewTunnelVm : ObservableObject
         _ => [HostRoute(PeerAddress.Trim())],
     };
 
-    static string HostRoute(string address)
+    static bool TryPeerHost(string address, out IPAddress ip)
     {
-        if (address.Contains('/')) return address;
-        return IPAddress.TryParse(address, out var ip) && ip.AddressFamily == AddressFamily.InterNetworkV6
-            ? address + "/128" : address + "/32";
+        ip = IPAddress.None;
+        var parts = address.Split('/');
+        if (parts.Length > 2 || parts[0].Contains('%') || !IPAddress.TryParse(parts[0], out var parsed)) return false;
+        if (parts.Length == 2 && parts[1] != (parsed.AddressFamily == AddressFamily.InterNetwork ? "32" : "128")) return false;
+        ip = parsed;
+        return true;
     }
+
+    static string HostRoute(string address) => TryPeerHost(address, out var ip)
+        ? $"{ip}/{(ip.AddressFamily == AddressFamily.InterNetwork ? 32 : 128)}"
+        : throw new InvalidOperationException("Die Tunnel-Adresse der Gegenstelle ist ungültig.");
 
     WgConfig BuildConfig()
     {
@@ -391,7 +408,7 @@ public sealed class NewTunnelVm : ObservableObject
     void BuildSummary()
     {
         ConfigPreview = BuildConfig().Serialize(maskSecrets: true);
-        ServerSnippet = ServerPeer.Snippet(TunnelStore.SanitizeName(Name), PublicKey, PresharedKey, Address);
+        ServerSnippet = ServerPeer.Snippet(TunnelStore.SanitizeName(Name), PublicKey, PresharedKey, Address, maskPresharedKey: true);
         InterfaceSuggestion = BuildInterfaceSuggestion();
         ServerHint = Scenario switch
         {
@@ -406,16 +423,19 @@ public sealed class NewTunnelVm : ObservableObject
         Warning = BuildOverlapWarning();
     }
 
+    public string ServerSnippetForCopy() => ServerPeer.Snippet(TunnelStore.SanitizeName(Name), PublicKey, PresharedKey, Address);
+
     /// <summary>Nur bei vorgeschlagenem (neuem) VPN-Netz: So könnte das [Interface] der Gegenstelle aussehen.</summary>
     string BuildInterfaceSuggestion()
     {
-        if (!IsSuggestedAddress) return "";
-        var peerIp = IsPointToPoint ? PeerAddress.Trim().Split('/')[0] : Cidr.HostV4(SuggestedSubnet, 1);
+        if (!IsSuggestedAddress || _suggestedSubnet is not { } subnet) return "";
+        if (IsSite && !ConfigBuilder.SplitList(VpnSubnet).Contains(subnet)) return "";
+        var peerAddress = IsPointToPoint ? HostRoute(PeerAddress.Trim()) : Cidr.HostV4(subnet, 1) + "/24";
         var port = Endpoint.Trim()[(Endpoint.Trim().LastIndexOf(':') + 1)..];
         return string.Join(Environment.NewLine,
             "[Interface]",
             "PrivateKey = <privater Schlüssel der Gegenstelle>",
-            $"Address = {peerIp}/24",
+            $"Address = {peerAddress}",
             $"ListenPort = {port}") + Environment.NewLine;
     }
 

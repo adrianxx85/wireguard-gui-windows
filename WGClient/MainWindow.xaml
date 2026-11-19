@@ -295,10 +295,17 @@
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                                     <Button DockPanel.Dock="Right" Content="Exportieren …" Click="Export_Click"/>
                                     <Button DockPanel.Dock="Right" Content="Server-Block kopieren" Click="CopyServerPeer_Click" Margin="0,0,8,0"
-                                            ToolTip="Kopiert den [Peer]-Block mit dem öffentlichen Schlüssel dieses Geräts – zum Eintragen auf dem WireGuard-Server."/>
+                                            IsEnabled="{Binding CanCopyServerPeer}"
+                                            ToolTip="Kopiert den [Peer]-Block für die ausgewählte Gegenstelle, einschließlich ihres optionalen Pre-shared Keys."/>
                                     <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center"
                                                Text="So wird der Tunnel mit den aktuellen Optionen gestartet (Schlüssel ausgeblendet)."/>
                                 </DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10"
+                                            Visibility="{Binding HasMultipleServerPeers, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="Gegenstelle für den Server-Block" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox AutomationProperties.Name="Gegenstelle für den Server-Block" ItemsSource="{Binding ServerPeers}"
+                                              SelectedItem="{Binding SelectedServerPeer}" DisplayMemberPath="Label"/>
+                                </StackPanel>
                                 <TextBox Style="{StaticResource CodeBox}" Text="{Binding EffectivePreview, Mode=OneWay}"/>
                             </DockPanel>
                         </TabItem>

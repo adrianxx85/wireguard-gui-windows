@@ -36,7 +36,7 @@ public partial class NewTunnelWindow : Window
 
     async void GeneratePsk_Click(object sender, RoutedEventArgs e) => await _vm.GeneratePresharedKeyAsync();
 
-    void CopySnippet_Click(object sender, RoutedEventArgs e) => Copy(_vm.ServerSnippet, "[Peer]-Block");
+    void CopySnippet_Click(object sender, RoutedEventArgs e) => Copy(_vm.ServerSnippetForCopy(), "[Peer]-Block");
 
     void CopyInterface_Click(object sender, RoutedEventArgs e) => Copy(_vm.InterfaceSuggestion, "[Interface]-Vorschlag");
 
@@ -44,7 +44,7 @@ public partial class NewTunnelWindow : Window
     {
         try
         {
-            Clipboard.SetText(text);
+            PrivateClipboard.SetText(text);
             _vm.Info = $"{what} in die Zwischenablage kopiert.";
         }
         catch (Exception ex) { _vm.Error = "Kopieren fehlgeschlagen: " + ex.Message; }

@@ -18,7 +18,7 @@ public static class LocalNetworks
                 foreach (var ua in nic.GetIPProperties().UnicastAddresses)
                 {
                     if (ua.Address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ua.Address)) continue;
-                    if (ua.PrefixLength is >= 8 and <= 32) result.Add(Cidr.NetworkV4(ua.Address, ua.PrefixLength));
+                    if (ua.PrefixLength is >= 0 and <= 32) result.Add(Cidr.NetworkV4(ua.Address, ua.PrefixLength));
                 }
             }
         }
