@@ -1,0 +1,313 @@
+<Window x:Class="WGClient.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WGClient"
+        Title="WG Client" Width="1000" Height="700" MinWidth="840" MinHeight="580"
+        Icon="pack://application:,,,/Assets/app.ico"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="270"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ================= Seitenleiste ================= -->
+        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="14,18,14,14">
+                <StackPanel DockPanel.Dock="Top" Margin="6,0,6,18">
+                    <TextBlock Text="WG Client" FontSize="19" FontWeight="SemiBold"/>
+                    <TextBlock Text="WireGuard-Tunnel verwalten" Style="{StaticResource Muted}"/>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                    <Button Content="+  Konfiguration importieren" Style="{StaticResource AccentButton}" Click="Import_Click" Padding="14,9"/>
+                    <Button Content="Tunnel entfernen" Style="{StaticResource GhostButton}" Margin="0,6,0,0"
+                            Click="Delete_Click" IsEnabled="{Binding HasSelection}"/>
+                    <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,12,0,12"/>
+                    <Button Click="Coffee_Click" Background="#2A2318" BorderBrush="#4A3A22" Foreground="#F5C27A" Padding="12,8"
+                            ToolTip="{x:Static local:App.CoffeeUrl}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="☕" FontFamily="Segoe UI Emoji" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="Buy me a coffee" Margin="8,0,0,0" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <Grid>
+                    <ListBox ItemsSource="{Binding Tunnels}" SelectedItem="{Binding Selected}"
+                             Background="Transparent" BorderThickness="0"
+                             ItemContainerStyle="{StaticResource TunnelItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Width="10" Height="10" Fill="{Binding StateBrush}" VerticalAlignment="Center" Margin="2,0,12,0"/>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding StateText}" Foreground="{StaticResource MutedBrush}" FontSize="11.5" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="Noch keine Tunnel." Style="{StaticResource Muted}" Margin="6,4"
+                               Visibility="{Binding NoSelection, Converter={StaticResource BoolToVis}}"/>
+                </Grid>
+            </DockPanel>
+        </Border>
+
+        <!-- ================= Inhalt ================= -->
+        <DockPanel Grid.Column="1">
+
+            <Border DockPanel.Dock="Top" Background="#3A2A12" Padding="16,10"
+                    Visibility="{Binding WireGuardMissing, Converter={StaticResource BoolToVis}}">
+                <TextBlock TextWrapping="Wrap" Foreground="#F5C27A">
+                    WireGuard für Windows ist nicht installiert. Diese App nutzt den offiziellen WireGuard-Dienst –
+                    bitte zuerst <Hyperlink NavigateUri="https://www.wireguard.com/install/" RequestNavigate="Hyperlink_RequestNavigate" Foreground="#FFD9A0">wireguard.com/install</Hyperlink> installieren.
+                </TextBlock>
+            </Border>
+
+            <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="20,7">
+                <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+            </Border>
+
+            <Grid>
+                <!-- Leerer Zustand -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                            Visibility="{Binding NoSelection, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="Kein Tunnel ausgewählt" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" Margin="0,8,0,18" FontSize="13"
+                               Text="Importiere eine WireGuard-Konfiguration (.conf) oder ziehe sie einfach in dieses Fenster."/>
+                    <Button Content="Konfiguration importieren" Style="{StaticResource AccentButton}" HorizontalAlignment="Center"
+                            Padding="18,9" Click="Import_Click"/>
+                </StackPanel>
+
+                <!-- Details -->
+                <Grid Margin="30,24,30,16" DataContext="{Binding Selected}"
+                      Visibility="{Binding DataContext.HasSelection, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Kopf -->
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="{Binding ConnectButtonText}" Background="{Binding ConnectButtonBrush}"
+                                BorderBrush="{Binding ConnectButtonBrush}" Foreground="White" FontWeight="SemiBold" FontSize="14"
+                                Width="150" Height="42" VerticalAlignment="Center"
+                                IsEnabled="{Binding CanToggle}" Click="Toggle_Click"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" FontSize="25" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding StateText}" Margin="8,0,0,0" Foreground="{StaticResource MutedBrush}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <TabControl Grid.Row="1" Margin="0,20,0,0">
+
+                        <!-- ===== Übersicht ===== -->
+                        <TabItem Header="Übersicht">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <UniformGrid Columns="3">
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="Letzter Handshake" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding HandshakeText}" Style="{StaticResource CardValue}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="Empfangen" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding RxText}" Style="{StaticResource CardValue}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="Gesendet" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding TxText}" Style="{StaticResource CardValue}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="Endpoint" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding EndpointText}" Style="{StaticResource CardValue}" ToolTip="{Binding EndpointText}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="Tunnel-Adresse" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding AddressText}" Style="{StaticResource CardValue}" ToolTip="{Binding AddressText}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource Card}">
+                                            <StackPanel>
+                                                <TextBlock Text="DNS" Style="{StaticResource Muted}"/>
+                                                <TextBlock Text="{Binding DnsText}" Style="{StaticResource CardValue}" ToolTip="{Binding DnsText}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </UniformGrid>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <TextBlock Text="Routing" Style="{StaticResource Muted}"/>
+                                            <TextBlock Text="{Binding RoutingSummary}" Style="{StaticResource CardValue}" TextWrapping="Wrap" TextTrimming="None"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource Muted}" Margin="2,8,0,0"
+                                               Text="Tunnel laufen als Windows-Dienst und bleiben aktiv, auch wenn dieses Fenster geschlossen wird."/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+
+                        <!-- ===== Optionen ===== -->
+                        <TabItem Header="Optionen">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <Button Content="Verwerfen" Style="{StaticResource GhostButton}" Margin="0,0,8,0"
+                                                    IsEnabled="{Binding IsDirty}" Click="Revert_Click"/>
+                                            <Button Content="{Binding SaveButtonText}" Style="{StaticResource AccentButton}"
+                                                    IsEnabled="{Binding IsDirty}" Click="Save_Click"/>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding ValidationError}" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center"
+                                                   TextWrapping="Wrap" Margin="0,0,12,0"/>
+                                    </DockPanel>
+                                </Border>
+
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel MaxWidth="680" HorizontalAlignment="Left" Margin="0,0,16,16">
+
+                                        <TextBlock Text="DNS" Style="{StaticResource SectionHeader}" Margin="0,0,0,10"/>
+                                        <TextBox Text="{Binding Dns, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBlock Style="{StaticResource Muted}" Margin="0,6,0,0"
+                                                   Text="Mehrere Server oder Suchdomänen mit Komma trennen (z. B. 192.168.0.10, 1.1.1.1). Leer = DNS des Systems verwenden. DNS-Server werden automatisch durch den Tunnel geroutet."/>
+
+                                        <TextBlock Text="Routing" Style="{StaticResource SectionHeader}"/>
+                                        <StackPanel>
+                                            <RadioButton IsChecked="{Binding IsFullTunnel}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Gesamten Traffic durch den Tunnel leiten" FontWeight="SemiBold"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Internet und alle Netze laufen über den VPN-Server."/>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton IsChecked="{Binding IsSplit}" Margin="0,8,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Text="Nur bestimmte Netze (Split-Tunnel)" FontWeight="SemiBold"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Nur die angegebenen Netze gehen durch den Tunnel, alles andere direkt ins Internet."/>
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </StackPanel>
+
+                                        <!-- Full-Tunnel-Optionen -->
+                                        <StackPanel Margin="4,16,0,0" Visibility="{Binding IsFullTunnel, Converter={StaticResource BoolToVis}}">
+                                            <CheckBox IsChecked="{Binding AllowLan}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Lokales Netzwerk erreichbar lassen"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Drucker, NAS usw. im aktuellen Netz bleiben erreichbar (private Adressbereiche gehen am Tunnel vorbei)."/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                            <StackPanel Margin="47,10,0,0" Visibility="{Binding AllowLan, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="Private Netze, die trotzdem durch den Tunnel sollen (z. B. das entfernte Heimnetz):" Style="{StaticResource FieldLabel}" TextWrapping="Wrap"/>
+                                                <TextBox Text="{Binding LanExceptions, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+
+                                            <CheckBox IsChecked="{Binding KillSwitch}" IsEnabled="{Binding KillSwitchEnabled}" Margin="0,14,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Text="Kill-Switch: Traffic außerhalb des Tunnels blockieren"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Verhindert Leaks, solange der Tunnel aktiv ist. Nur mit genau einem Peer wirksam, nicht kombinierbar mit LAN-Zugriff."/>
+                                                </StackPanel>
+                                            </CheckBox>
+
+                                            <CheckBox IsChecked="{Binding IncludeIPv6}" Margin="0,14,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Text="IPv6 ebenfalls durch den Tunnel leiten"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Verhindert, dass IPv6-Verbindungen am Tunnel vorbeigehen. Unterstützt der Server kein IPv6, ist IPv6 dann blockiert."/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </StackPanel>
+
+                                        <!-- Split-Optionen -->
+                                        <StackPanel Margin="4,16,0,0" Visibility="{Binding IsSplit, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="Netze (AllowedIPs), durch Komma oder Zeilenumbruch getrennt:" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding SplitAllowedIps, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True"
+                                                     TextWrapping="Wrap" MinHeight="64" FontFamily="{StaticResource MonoFont}"/>
+                                        </StackPanel>
+
+                                        <TextBlock Text="Resultierende AllowedIPs" Style="{StaticResource FieldLabel}" Margin="4,16,0,4"/>
+                                        <TextBlock Text="{Binding AllowedIpsPreview}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,0"/>
+
+                                        <TextBlock Text="Verbindung" Style="{StaticResource SectionHeader}"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="130"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Endpoint (host:port)" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="MTU" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox Text="{Binding MtuText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Leer = automatisch"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4">
+                                                <TextBlock Text="Keepalive (Sek.)" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox Text="{Binding KeepaliveText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Leer oder 0 = aus. Typisch 25 hinter NAT."/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock Text="Start" Style="{StaticResource SectionHeader}"/>
+                                        <CheckBox IsChecked="{Binding Autostart}">
+                                            <StackPanel>
+                                                <TextBlock Text="Beim Windows-Start automatisch verbinden"/>
+                                                <TextBlock Style="{StaticResource Muted}" Text="Der Tunnel-Dienst startet mit Windows, auch ohne Anmeldung und ohne diese App."/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </TabItem>
+
+                        <!-- ===== Konfiguration ===== -->
+                        <TabItem Header="Konfiguration">
+                            <DockPanel>
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                    <Button DockPanel.Dock="Right" Content="Exportieren …" Click="Export_Click"/>
+                                    <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center"
+                                               Text="So wird der Tunnel mit den aktuellen Optionen gestartet (Schlüssel ausgeblendet)."/>
+                                </DockPanel>
+                                <TextBox Style="{StaticResource CodeBox}" Text="{Binding EffectivePreview, Mode=OneWay}"/>
+                            </DockPanel>
+                        </TabItem>
+
+                        <!-- ===== Log ===== -->
+                        <TabItem Header="Log">
+                            <DockPanel DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                    <Button DockPanel.Dock="Right" Content="Aktualisieren" Click="RefreshLog_Click"/>
+                                    <CheckBox IsChecked="{Binding LogOnlySelected}" VerticalAlignment="Center" Content="Nur Einträge dieses Tunnels"/>
+                                </DockPanel>
+                                <TextBox x:Name="LogBox" Style="{StaticResource CodeBox}" Text="{Binding LogText, Mode=OneWay}" FontSize="11.5"/>
+                            </DockPanel>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
+            </Grid>
+        </DockPanel>
+    </Grid>
+</Window>

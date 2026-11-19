@@ -1,0 +1,295 @@
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Windows.Media;
+using WGClient.Core;
+
+namespace WGClient.ViewModels;
+
+public sealed class TunnelVm : ObservableObject
+{
+    static readonly Brush Green = Freeze(Color.FromRgb(0x2E, 0xCC, 0x71));
+    static readonly Brush Amber = Freeze(Color.FromRgb(0xF5, 0xA5, 0x24));
+    static readonly Brush Grey = Freeze(Color.FromRgb(0x5A, 0x62, 0x73));
+    static readonly Brush ConnectBrush = Freeze(Color.FromRgb(0x2E, 0xA0, 0x5C));
+    static readonly Brush DisconnectBrush = Freeze(Color.FromRgb(0xC9, 0x3C, 0x41));
+
+    static Brush Freeze(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
+
+    public TunnelVm(string name, WgConfig original, TunnelOptions options)
+    {
+        Name = name;
+        Original = original;
+        Saved = options;
+        LoadEdit(options);
+    }
+
+    public string Name { get; }
+    public WgConfig Original { get; private set; }
+    public TunnelOptions Saved { get; private set; }
+
+    // ---------- Laufzeitstatus ----------
+
+    TunnelState _state;
+    public TunnelState State
+    {
+        get => _state;
+        set { if (Set(ref _state, value)) RaiseStatus(); }
+    }
+
+    TunnelStats? _stats;
+    public TunnelStats? Stats
+    {
+        get => _stats;
+        set { _stats = value; RaiseStatus(); }
+    }
+
+    bool _isBusy;
+    public bool IsBusy
+    {
+        get => _isBusy;
+        set { if (Set(ref _isBusy, value)) RaiseStatus(); }
+    }
+
+    public bool IsActive => State is TunnelState.Running or TunnelState.Starting;
+    public bool CanToggle => !IsBusy && State is not TunnelState.Stopping;
+    bool HasRecentHandshake => Stats?.LastHandshake is { } h && DateTimeOffset.UtcNow - h < TimeSpan.FromMinutes(3);
+
+    public string StateText => IsBusy ? "Bitte warten …" : State switch
+    {
+        TunnelState.Running => HasRecentHandshake ? "Verbunden" : "Aktiv – warte auf Handshake",
+        TunnelState.Starting => "Verbinde …",
+        TunnelState.Stopping => "Trenne …",
+        _ => "Getrennt",
+    };
+
+    public Brush StateBrush => IsBusy || State is TunnelState.Starting or TunnelState.Stopping ? Amber
+        : State == TunnelState.Running ? (HasRecentHandshake ? Green : Amber)
+        : Grey;
+
+    public string ConnectButtonText => IsActive ? "Trennen" : "Verbinden";
+    public Brush ConnectButtonBrush => IsActive ? DisconnectBrush : ConnectBrush;
+
+    public string HandshakeText => Stats?.LastHandshake is { } h ? FormatAgo(h) : "—";
+    public string RxText => Stats is null ? "—" : FormatBytes(Stats.RxBytes);
+    public string TxText => Stats is null ? "—" : FormatBytes(Stats.TxBytes);
+    public string EndpointText => Stats?.Endpoint ?? (string.IsNullOrWhiteSpace(Saved.Endpoint) ? "—" : Saved.Endpoint);
+    public string AddressText => Original.Interface?.Get("Address") ?? "—";
+    public string DnsText => string.IsNullOrWhiteSpace(Saved.Dns) ? "System-DNS" : Saved.Dns;
+    public string Subtitle => string.IsNullOrWhiteSpace(Saved.Endpoint) ? AddressText : Saved.Endpoint;
+    public string PeerCountText => $"{Original.Peers.Count()} Peer(s)";
+
+    public string RoutingSummary => Saved.Mode == RouteMode.Split
+        ? "Split-Tunnel: " + (string.IsNullOrWhiteSpace(Saved.SplitAllowedIps) ? "—" : Saved.SplitAllowedIps)
+        : "Gesamter Traffic"
+          + (Saved.AllowLan ? " · LAN erreichbar" : Saved.KillSwitch ? " · Kill-Switch" : "")
+          + (Saved.IncludeIPv6 ? " · inkl. IPv6" : "");
+
+    void RaiseStatus() => OnPropertyChanged(
+        nameof(IsActive), nameof(CanToggle), nameof(StateText), nameof(StateBrush),
+        nameof(ConnectButtonText), nameof(ConnectButtonBrush), nameof(HandshakeText),
+        nameof(RxText), nameof(TxText), nameof(EndpointText), nameof(SaveButtonText));
+
+    // ---------- Bearbeitbare Optionen ----------
+
+    bool _loading;
+    bool SetEdit<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    {
+        if (!Set(ref field, value, name)) return false;
+        if (!_loading) { IsDirty = true; UpdatePreview(); }
+        return true;
+    }
+
+    string _dns = "";
+    public string Dns { get => _dns; set => SetEdit(ref _dns, value); }
+
+    bool _isFullTunnel;
+    public bool IsFullTunnel
+    {
+        get => _isFullTunnel;
+        set { if (SetEdit(ref _isFullTunnel, value)) OnPropertyChanged(nameof(IsSplit)); }
+    }
+    public bool IsSplit
+    {
+        get => !_isFullTunnel;
+        set => IsFullTunnel = !value;
+    }
+
+    bool _killSwitch;
+    public bool KillSwitch { get => _killSwitch; set => SetEdit(ref _killSwitch, value); }
+
+    bool _allowLan;
+    public bool AllowLan
+    {
+        get => _allowLan;
+        set { if (SetEdit(ref _allowLan, value)) OnPropertyChanged(nameof(KillSwitchEnabled)); }
+    }
+    public bool KillSwitchEnabled => !AllowLan;
+
+    string _lanExceptions = "";
+    public string LanExceptions { get => _lanExceptions; set => SetEdit(ref _lanExceptions, value); }
+
+    bool _includeIPv6;
+    public bool IncludeIPv6 { get => _includeIPv6; set => SetEdit(ref _includeIPv6, value); }
+
+    string _splitAllowedIps = "";
+    public string SplitAllowedIps { get => _splitAllowedIps; set => SetEdit(ref _splitAllowedIps, value); }
+
+    string _endpoint = "";
+    public string Endpoint { get => _endpoint; set => SetEdit(ref _endpoint, value); }
+
+    string _mtuText = "";
+    public string MtuText { get => _mtuText; set => SetEdit(ref _mtuText, value); }
+
+    string _keepaliveText = "";
+    public string KeepaliveText { get => _keepaliveText; set => SetEdit(ref _keepaliveText, value); }
+
+    bool _autostart;
+    public bool Autostart { get => _autostart; set => SetEdit(ref _autostart, value); }
+
+    bool _isDirty;
+    public bool IsDirty
+    {
+        get => _isDirty;
+        private set { if (Set(ref _isDirty, value)) OnPropertyChanged(nameof(SaveButtonText)); }
+    }
+
+    public string SaveButtonText => IsActive ? "Speichern & neu verbinden" : "Speichern";
+
+    string? _validationError;
+    public string? ValidationError
+    {
+        get => _validationError;
+        private set { if (Set(ref _validationError, value)) OnPropertyChanged(nameof(HasValidationError)); }
+    }
+    public bool HasValidationError => ValidationError is not null;
+
+    string _effectivePreview = "";
+    public string EffectivePreview { get => _effectivePreview; private set => Set(ref _effectivePreview, value); }
+
+    string _allowedIpsPreview = "";
+    public string AllowedIpsPreview { get => _allowedIpsPreview; private set => Set(ref _allowedIpsPreview, value); }
+
+    public void LoadEdit(TunnelOptions o)
+    {
+        _loading = true;
+        Dns = o.Dns;
+        IsFullTunnel = o.Mode == RouteMode.FullTunnel;
+        KillSwitch = o.KillSwitch;
+        AllowLan = o.AllowLan;
+        LanExceptions = o.LanExceptions;
+        IncludeIPv6 = o.IncludeIPv6;
+        SplitAllowedIps = o.SplitAllowedIps;
+        Endpoint = o.Endpoint;
+        MtuText = o.Mtu?.ToString() ?? "";
+        KeepaliveText = o.PersistentKeepalive?.ToString() ?? "";
+        Autostart = o.Autostart;
+        _loading = false;
+        IsDirty = false;
+        UpdatePreview();
+    }
+
+    public bool TryGetOptions(out TunnelOptions options, out string? error)
+    {
+        options = new TunnelOptions();
+        error = null;
+
+        int? mtu = null, keepalive = null;
+        if (!string.IsNullOrWhiteSpace(MtuText))
+        {
+            if (!int.TryParse(MtuText.Trim(), out var m) || m is < 576 or > 9000) { error = "MTU muss zwischen 576 und 9000 liegen."; return false; }
+            mtu = m;
+        }
+        if (!string.IsNullOrWhiteSpace(KeepaliveText))
+        {
+            if (!int.TryParse(KeepaliveText.Trim(), out var k) || k is < 0 or > 65535) { error = "Keepalive muss zwischen 0 und 65535 Sekunden liegen."; return false; }
+            keepalive = k;
+        }
+
+        var ep = Endpoint.Trim();
+        if (ep.Length > 0)
+        {
+            var colon = ep.LastIndexOf(':');
+            if (colon <= 0 || !int.TryParse(ep[(colon + 1)..], out var port) || port is < 1 or > 65535)
+            { error = "Endpoint muss das Format host:port haben."; return false; }
+        }
+
+        if (IsSplit)
+        {
+            var nets = ConfigBuilder.SplitList(SplitAllowedIps);
+            if (nets.Count == 0) { error = "Für den Split-Tunnel mindestens ein Netz angeben (z. B. 192.168.0.0/24)."; return false; }
+            var bad = nets.FirstOrDefault(n => !Cidr.IsValid(n));
+            if (bad is not null) { error = $"Ungültiges Netz: {bad}"; return false; }
+        }
+        if (IsFullTunnel && AllowLan)
+        {
+            var bad = ConfigBuilder.SplitList(LanExceptions).FirstOrDefault(n => !Cidr.IsValid(n));
+            if (bad is not null) { error = $"Ungültiges Netz: {bad}"; return false; }
+        }
+
+        options = new TunnelOptions
+        {
+            Dns = string.Join(", ", ConfigBuilder.SplitList(Dns)),
+            Mode = IsFullTunnel ? RouteMode.FullTunnel : RouteMode.Split,
+            KillSwitch = KillSwitch,
+            AllowLan = AllowLan,
+            LanExceptions = string.Join(", ", ConfigBuilder.SplitList(LanExceptions)),
+            IncludeIPv6 = IncludeIPv6,
+            SplitAllowedIps = string.Join(", ", ConfigBuilder.SplitList(SplitAllowedIps)),
+            Endpoint = ep,
+            Mtu = mtu,
+            PersistentKeepalive = keepalive,
+            Autostart = Autostart,
+        };
+        return true;
+    }
+
+    void UpdatePreview()
+    {
+        if (TryGetOptions(out var o, out var err))
+        {
+            ValidationError = null;
+            AllowedIpsPreview = string.Join(", ", ConfigBuilder.ComputeAllowedIps(o));
+            EffectivePreview = ConfigBuilder.Build(Original, o).Serialize(maskSecrets: true);
+        }
+        else
+        {
+            ValidationError = err;
+        }
+    }
+
+    public void ApplySaved(TunnelOptions saved)
+    {
+        Saved = saved;
+        IsDirty = false;
+        OnPropertyChanged(nameof(Saved), nameof(Subtitle), nameof(RoutingSummary), nameof(DnsText), nameof(EndpointText));
+    }
+
+    public void ReplaceOriginal(WgConfig cfg, TunnelOptions options)
+    {
+        Original = cfg;
+        ApplySaved(options);
+        LoadEdit(options);
+        OnPropertyChanged(nameof(AddressText), nameof(PeerCountText));
+    }
+
+    // ---------- Formatierung ----------
+
+    static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+        double v = bytes;
+        var i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return i == 0 ? $"{bytes} B" : v.ToString("0.0", CultureInfo.CurrentCulture) + " " + units[i];
+    }
+
+    static string FormatAgo(DateTimeOffset t)
+    {
+        var d = DateTimeOffset.UtcNow - t;
+        if (d.TotalSeconds < 0) d = TimeSpan.Zero;
+        if (d.TotalSeconds < 60) return $"vor {(int)d.TotalSeconds} s";
+        if (d.TotalMinutes < 60) return $"vor {(int)d.TotalMinutes} min";
+        if (d.TotalHours < 48) return $"vor {(int)d.TotalHours} h";
+        return t.LocalDateTime.ToString("g", CultureInfo.CurrentCulture);
+    }
+}
