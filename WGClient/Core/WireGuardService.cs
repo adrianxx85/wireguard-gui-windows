@@ -167,11 +167,36 @@ public static class WireGuardService
         return true;
     }
 
-    static async Task<(int ExitCode, string Output)> RunAsync(string exe, params string[] args)
+    // ---------- Schlüssel (über wg.exe) ----------
+
+    /// <summary>Erzeugt einen privaten Schlüssel bzw. mit <paramref name="preshared"/> einen Pre-shared Key.</summary>
+    public static async Task<string> GenerateKeyAsync(bool preshared = false)
+    {
+        EnsureInstalled();
+        var (code, output) = await RunAsync(WgExe, preshared ? "genpsk" : "genkey");
+        if (code != 0 || !WgValidation.IsKey(output))
+            throw new InvalidOperationException("Schlüssel konnte nicht erzeugt werden (wg.exe).");
+        return output.Trim();
+    }
+
+    public static async Task<string> PublicKeyAsync(string privateKey)
+    {
+        EnsureInstalled();
+        // Privater Schlüssel nur über stdin, nie als Argument (wäre in der Prozessliste sichtbar).
+        var (code, output) = await RunCoreAsync(WgExe, ["pubkey"], privateKey.Trim() + "\n");
+        if (code != 0 || !WgValidation.IsKey(output))
+            throw new InvalidOperationException("Öffentlicher Schlüssel konnte nicht berechnet werden. Ist der private Schlüssel gültig?");
+        return output.Trim();
+    }
+
+    static Task<(int ExitCode, string Output)> RunAsync(string exe, params string[] args) => RunCoreAsync(exe, args, null);
+
+    static async Task<(int ExitCode, string Output)> RunCoreAsync(string exe, string[] args, string? input)
     {
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
+            RedirectStandardInput = input is not null,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
@@ -181,6 +206,11 @@ public static class WireGuardService
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{exe} konnte nicht gestartet werden.");
+        if (input is not null)
+        {
+            await p.StandardInput.WriteAsync(input);
+            p.StandardInput.Close();
+        }
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));

@@ -133,7 +133,10 @@ public sealed partial class TunnelStore
     /// <summary>WireGuard erlaubt als Tunnelname nur [a-zA-Z0-9_=+.-], max. 32 Zeichen.</summary>
     public static string SanitizeName(string name)
     {
-        var n = InvalidNameChars().Replace(name.Trim(), "_");
+        var n = name.Trim()
+            .Replace("ä", "ae").Replace("ö", "oe").Replace("ü", "ue")
+            .Replace("Ä", "Ae").Replace("Ö", "Oe").Replace("Ü", "Ue").Replace("ß", "ss");
+        n = InvalidNameChars().Replace(n, "_");
         if (n.Length > 32) n = n[..32];
         return n.Length == 0 ? "tunnel" : n;
     }

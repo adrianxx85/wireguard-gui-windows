@@ -61,14 +61,24 @@ public sealed class MainVm : ObservableObject
     }
 
     /// <returns>Den importierten Tunnel oder null, wenn der Benutzer abgebrochen hat.</returns>
-    public TunnelVm? Import(string path, Func<string, bool> confirmOverwrite)
+    public TunnelVm? Import(string path, Func<string, bool> confirmOverwrite) =>
+        Add(Path.GetFileNameWithoutExtension(path), File.ReadAllText(path), confirmOverwrite);
+
+    public bool NameExists(string name)
     {
-        var text = File.ReadAllText(path);
+        var sanitized = TunnelStore.SanitizeName(name);
+        return Tunnels.Any(t => t.Name.Equals(sanitized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Legt einen Tunnel aus Konfigurationstext an (Import oder Assistent).</summary>
+    /// <returns>Den Tunnel oder null, wenn der Benutzer das Überschreiben abgelehnt hat.</returns>
+    public TunnelVm? Add(string requestedName, string text, Func<string, bool> confirmOverwrite)
+    {
         var cfg = WgConfig.Parse(text);
         var errors = cfg.Validate();
         if (errors.Count > 0) throw new FormatException(string.Join(Environment.NewLine, errors));
 
-        var name = TunnelStore.SanitizeName(Path.GetFileNameWithoutExtension(path));
+        var name = TunnelStore.SanitizeName(requestedName);
         var existing = Tunnels.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {

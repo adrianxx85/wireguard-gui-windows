@@ -15,6 +15,8 @@ einstellen, ohne die Datei von Hand zu bearbeiten.
    Zeigt Windows "Der Computer wurde durch Windows geschützt" an:
    auf "Weitere Informationen" und dann "Trotzdem ausführen" klicken.
    (Das Setup ist nicht digital signiert.)
+   Auch der Browser kann beim Herunterladen warnen ("wird selten
+   heruntergeladen"): Download über das Menü "..." -> "Beibehalten" behalten.
 2. Den Schritten des Assistenten folgen.
 3. Fehlen auf dem PC noch Komponenten, lädt das Setup sie automatisch
    herunter und installiert sie:
@@ -33,12 +35,27 @@ Voraussetzungen: Windows 10 oder 11 (64 Bit), Administratorrechte.
 2. Auf "+ Konfiguration importieren" klicken und deine .conf-Datei wählen.
    Alternativ: die .conf-Datei einfach in das Fenster ziehen, oder per
    Rechtsklick auf die Datei -> "Öffnen mit" -> "WG Client".
+   Noch keine .conf-Datei? Dann "Neuen Tunnel erstellen" nutzen (siehe unten).
 3. Auf "Verbinden" klicken.
    Der Punkt neben dem Tunnelnamen zeigt den Status:
      grün  = verbunden (Handshake mit dem Server erfolgreich)
      gelb  = Tunnel aktiv, wartet auf Antwort vom Server
      grau  = getrennt
 4. Zum Trennen auf "Trennen" klicken.
+
+Neuen Tunnel erstellen (ohne .conf-Datei)
+  Der Assistent führt in drei Schritten zur fertigen Konfiguration:
+  1. Dieses Gerät: Name, Tunnel-Adresse (z. B. 10.8.0.2/32) und optional
+     DNS. Das Schlüsselpaar wird automatisch erzeugt; einen vorgegebenen
+     privaten Schlüssel kannst du stattdessen einfügen.
+  2. Server: öffentlicher Schlüssel des Servers, Endpoint (host:port),
+     optional ein Pre-shared Key, Routing (alles oder nur bestimmte Netze)
+     und Keepalive.
+  3. Zusammenfassung: Der angezeigte [Peer]-Block muss in die Konfiguration
+     des WireGuard-Servers (Button "Kopieren"). Erst danach klappt das
+     Verbinden. Der private Schlüssel verlässt den PC dabei nicht.
+     Später findest du den Block jederzeit wieder im Reiter "Konfiguration"
+     unter "Server-Block kopieren".
 
 
 3. Die Bereiche im Überblick
@@ -55,6 +72,8 @@ Optionen
 Konfiguration
   Zeigt die Konfiguration, mit der der Tunnel tatsächlich gestartet wird
   (private Schlüssel ausgeblendet). "Exportieren" speichert sie als .conf.
+  "Server-Block kopieren" kopiert den [Peer]-Block mit dem öffentlichen
+  Schlüssel dieses Geräts – zum Eintragen auf dem WireGuard-Server.
 
 Log
   Das WireGuard-Protokoll – hilfreich, wenn eine Verbindung nicht klappt.

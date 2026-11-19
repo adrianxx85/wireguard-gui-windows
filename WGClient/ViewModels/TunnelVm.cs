@@ -216,12 +216,8 @@ public sealed class TunnelVm : ObservableObject
         }
 
         var ep = Endpoint.Trim();
-        if (ep.Length > 0)
-        {
-            var colon = ep.LastIndexOf(':');
-            if (colon <= 0 || !int.TryParse(ep[(colon + 1)..], out var port) || port is < 1 or > 65535)
-            { error = "Endpoint muss das Format host:port haben."; return false; }
-        }
+        if (ep.Length > 0 && !WgValidation.IsEndpoint(ep))
+        { error = "Endpoint muss das Format host:port haben (IPv6 als [Adresse]:port)."; return false; }
 
         var splitRoutes = ConfigBuilder.SplitList(SplitAllowedIps);
         var exceptions = string.Join(", ", ConfigBuilder.SplitList(LanExceptions));

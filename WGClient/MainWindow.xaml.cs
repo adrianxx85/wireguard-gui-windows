@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Navigation;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -62,9 +60,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        var hwnd = new WindowInteropHelper(this).Handle;
-        var dark = 1;
-        DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(int));
+        DarkTitleBar.Apply(this);
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -118,6 +114,20 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog(this) != true) return;
         foreach (var file in dlg.FileNames) ImportFile(file);
+    }
+
+    void NewTunnel_Click(object sender, RoutedEventArgs e)
+    {
+        var wizard = new NewTunnelWindow(_vm.NameExists) { Owner = this };
+        if (wizard.ShowDialog() != true || wizard.Result is not { } result) return;
+        try
+        {
+            var t = _vm.Add(result.Name, result.Config, _ => false)
+                    ?? throw new InvalidOperationException($"Ein Tunnel \"{result.Name}\" existiert bereits.");
+            _vm.Selected = t;
+            _vm.StatusMessage = $"\"{t.Name}\" erstellt. Sobald der Peer auf dem Server eingetragen ist, kannst du verbinden.";
+        }
+        catch (Exception ex) { ShowError("Tunnel konnte nicht erstellt werden", ex); }
     }
 
     void ImportFile(string path)
@@ -185,6 +195,17 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("Export fehlgeschlagen", ex); }
     }
 
+    async void CopyServerPeer_Click(object sender, RoutedEventArgs e)
+    {
+        if (_vm.Selected is not { } t) return;
+        try
+        {
+            Clipboard.SetText(await Core.ServerPeer.SnippetAsync(t.Name, t.Original));
+            _vm.StatusMessage = $"[Peer]-Block für \"{t.Name}\" in die Zwischenablage kopiert – auf dem Server eintragen.";
+        }
+        catch (Exception ex) { ShowError("Server-Block konnte nicht erstellt werden", ex); }
+    }
+
     async void RefreshLog_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -226,7 +247,4 @@ public partial class MainWindow : Window
         _vm.StatusMessage = $"{title}: {ex.Message}";
         MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
-
-    [DllImport("dwmapi.dll")]
-    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 }

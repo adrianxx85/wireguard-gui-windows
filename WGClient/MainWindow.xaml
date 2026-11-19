@@ -25,6 +25,7 @@
 
                 <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
                     <Button Content="+  Konfiguration importieren" Style="{StaticResource AccentButton}" Click="Import_Click" Padding="14,9"/>
+                    <Button Content="✎  Neuen Tunnel erstellen" Click="NewTunnel_Click" Padding="14,8" Margin="0,6,0,0"/>
                     <Button Content="Tunnel entfernen" Style="{StaticResource GhostButton}" Margin="0,6,0,0"
                             Click="Delete_Click" IsEnabled="{Binding Selected.CanRemove, FallbackValue=False}"/>
                     <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,12,0,12"/>
@@ -85,9 +86,11 @@
                             Visibility="{Binding NoSelection, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Kein Tunnel ausgewählt" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                     <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" Margin="0,8,0,18" FontSize="13"
-                               Text="Importiere eine WireGuard-Konfiguration (.conf) oder ziehe sie einfach in dieses Fenster."/>
-                    <Button Content="Konfiguration importieren" Style="{StaticResource AccentButton}" HorizontalAlignment="Center"
-                            Padding="18,9" Click="Import_Click"/>
+                               Text="Importiere eine WireGuard-Konfiguration (.conf), ziehe sie in dieses Fenster – oder erstelle einen neuen Tunnel mit dem Assistenten."/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Content="Konfiguration importieren" Style="{StaticResource AccentButton}" Padding="18,9" Click="Import_Click"/>
+                        <Button Content="Neuen Tunnel erstellen" Padding="18,9" Margin="10,0,0,0" Click="NewTunnel_Click"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Details -->
@@ -291,6 +294,8 @@
                             <DockPanel>
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                                     <Button DockPanel.Dock="Right" Content="Exportieren …" Click="Export_Click"/>
+                                    <Button DockPanel.Dock="Right" Content="Server-Block kopieren" Click="CopyServerPeer_Click" Margin="0,0,8,0"
+                                            ToolTip="Kopiert den [Peer]-Block mit dem öffentlichen Schlüssel dieses Geräts – zum Eintragen auf dem WireGuard-Server."/>
                                     <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center"
                                                Text="So wird der Tunnel mit den aktuellen Optionen gestartet (Schlüssel ausgeblendet)."/>
                                 </DockPanel>
