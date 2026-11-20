@@ -48,6 +48,10 @@ Ausführliche Bedienungsanleitung: [ANLEITUNG.md](ANLEITUNG.md)
 
 ## Wie es funktioniert
 
+Unter **Einstellungen → WireGuard** siehst du die Versionsnummer der verwendeten WireGuard-Komponente.
+Die Updateprüfung führt in der Standard-Edition zum offiziellen WireGuard-Updater und in der Standalone-Edition
+zum passenden WG-Client-Installer.
+
 WG Client bringt keine eigene VPN-Implementierung mit, sondern steuert die offizielle WireGuard-Installation:
 Beim Verbinden wird aus Original-Konfiguration + Optionen eine effektive `.conf` erzeugt und per
 `wireguard.exe /installtunnelservice` als Tunnel-Dienst gestartet. Status und Traffic kommen von `wg show`.

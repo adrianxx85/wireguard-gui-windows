@@ -13,7 +13,7 @@ internal static class ServiceFiles
         FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership | FileSystemRights.WriteAttributes |
         FileSystemRights.WriteExtendedAttributes | (FileSystemRights)0x50000000; // GENERIC_WRITE | GENERIC_ALL
 
-    public static void Verify(string executable, string tunnelDll, string driverDll)
+    public static void Verify(string executable, params string[] libraries)
     {
         var directory = new FileInfo(executable).Directory!;
         if (new DriveInfo(directory.Root.FullName).DriveType != DriveType.Fixed) throw UnsafePath(directory.FullName);
@@ -24,7 +24,7 @@ internal static class ServiceFiles
             var rights = ancestor == directory ? ReplaceRights | FileSystemRights.WriteData | FileSystemRights.AppendData : ReplaceRights;
             VerifyEntry(ancestor, rights);
         }
-        foreach (var path in new[] { executable, tunnelDll, driverDll })
+        foreach (var path in libraries.Prepend(executable))
             VerifyEntry(new FileInfo(path), ReplaceRights | FileSystemRights.WriteData | FileSystemRights.AppendData);
     }
 
@@ -44,5 +44,5 @@ internal static class ServiceFiles
     static bool IsTrusted(SecurityIdentifier? sid) => sid is not null &&
         (SystemSid.Equals(sid) || AdministratorsSid.Equals(sid) || TrustedInstallerSid.Equals(sid));
 
-    static IOException UnsafePath(string path) => new($"Der Standalone-Dienst darf diesen Pfad nicht verwenden: \"{path}\". Bitte WG Client unter Programme installieren.");
+    static IOException UnsafePath(string path) => new($"Der Programmdateipfad ist nicht ausreichend geschützt: \"{path}\". Verwende eine Installation unter Programme.");
 }

@@ -16,9 +16,10 @@ public static class EmbeddedTunnel
     public const string ServiceSwitch = "/service";
 
     static string AppDir => AppContext.BaseDirectory;
+    internal static string DriverPath => Path.Combine(AppDir, DriverDll);
 
     /// <summary>true, wenn beide Bausteine neben WGClient.exe liegen (Standalone-Installation).</summary>
-    public static bool IsAvailable => File.Exists(Path.Combine(AppDir, TunnelDll)) && File.Exists(Path.Combine(AppDir, DriverDll));
+    public static bool IsAvailable => File.Exists(Path.Combine(AppDir, TunnelDll)) && File.Exists(DriverPath);
 
     static EmbeddedTunnel()
     {
@@ -36,7 +37,7 @@ public static class EmbeddedTunnel
     /// <summary>Befehlszeile des Tunnel-Dienstes (immer mit Anführungszeichen, wie im Installer geprüft).</summary>
     public static string ServiceCommandLine(string configPath) => $"\"{ExePath}\" {ServiceSwitch} \"{configPath}\"";
 
-    public static void VerifyInstallation() => ServiceFiles.Verify(ExePath, Path.Combine(AppDir, TunnelDll), Path.Combine(AppDir, DriverDll));
+    public static void VerifyInstallation() => ServiceFiles.Verify(ExePath, Path.Combine(AppDir, TunnelDll), DriverPath);
 
     public static void Install(string tunnel, string configPath, bool autostart)
     {

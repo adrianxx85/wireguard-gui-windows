@@ -104,6 +104,9 @@ public partial class MainWindow : Window
 
     void Coffee_Click(object sender, RoutedEventArgs e) => App.OpenUrl(App.CoffeeUrl);
 
+    void Settings_Click(object sender, RoutedEventArgs e) => new SettingsWindow(() => _vm.Tunnels
+        .Where(t => t.IsBusy || t.State != Core.TunnelState.Disconnected).Select(t => t.Name).ToArray()) { Owner = this }.ShowDialog();
+
     // ---------- Aktionen ----------
 
     void Import_Click(object sender, RoutedEventArgs e)

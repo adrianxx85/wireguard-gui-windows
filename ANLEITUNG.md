@@ -105,6 +105,18 @@ Neuen Tunnel erstellen (ohne .conf-Datei)
 
 Die installierte Versionsnummer steht unten rechts in der Statusleiste.
 
+Einstellungen → WireGuard
+  Hier siehst du die WG-Client-Edition und die Version von WireGuard für
+  Windows oder des mitgelieferten WireGuardNT. "Nach Updates suchen" zeigt
+  den verfügbaren Updateweg für deine Edition.
+  - Standard: "WireGuard aktualisieren" startet den offiziellen Updater.
+    Fehlt die WireGuard-App, öffnet WG Client die offizielle Downloadseite.
+  - Standalone: Bei einer neueren WG-Client-Version öffnet die Schaltfläche
+    den passenden Installer im Browser. Beende WG Client über das Tray-Symbol,
+    bevor du den heruntergeladenen Installer ausführst.
+  Die Prüfung kann während einer Verbindung laufen. Beim Installieren können
+  aktive Tunnel vorübergehend getrennt werden.
+
 Übersicht
   Letzter Handshake, empfangene/gesendete Daten, Endpoint, Tunnel-Adresse,
   DNS und Routing auf einen Blick.

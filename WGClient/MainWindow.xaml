@@ -29,6 +29,7 @@
                     <Button Content="Tunnel entfernen" Style="{StaticResource GhostButton}" Margin="0,6,0,0"
                             Click="Delete_Click" IsEnabled="{Binding Selected.CanRemove, FallbackValue=False}"/>
                     <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,12,0,12"/>
+                    <Button Content="Einstellungen" Click="Settings_Click" Margin="0,0,0,8"/>
                     <Button Click="Coffee_Click" Background="#2A2318" BorderBrush="#4A3A22" Foreground="#F5C27A" Padding="12,8"
                             ToolTip="{x:Static local:App.CoffeeUrl}">
                         <StackPanel Orientation="Horizontal">
