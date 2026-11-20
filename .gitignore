@@ -13,6 +13,7 @@ dist/
 # WireGuard-Konfigurationen enthalten private Schlüssel – niemals committen
 *.conf
 *.conf.dpapi
+*.wgprofile
 
 # Native Bausteine (werden von native\build-native.ps1 erzeugt)
 native/.build/

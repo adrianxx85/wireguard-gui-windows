@@ -20,14 +20,20 @@ internal static class NativeServices
         return service?.QueryStatus() ?? (markedForDeletion ? Status.MarkedForDeletion : null);
     }
 
-    public static ServiceHandle? OpenForQuery(string serviceName, out bool markedForDeletion)
+    static ServiceHandle? OpenForQuery(string serviceName, out bool markedForDeletion) =>
+        Open(serviceName, SERVICE_QUERY_STATUS, out markedForDeletion);
+
+    public static ServiceHandle? OpenForRemoval(string serviceName, out bool markedForDeletion) =>
+        Open(serviceName, SERVICE_QUERY_STATUS | SERVICE_STOP | DELETE, out markedForDeletion);
+
+    static ServiceHandle? Open(string serviceName, uint access, out bool markedForDeletion)
     {
         markedForDeletion = false;
         var scm = OpenSCManagerW(null, null, SC_MANAGER_CONNECT);
         if (scm == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
         try
         {
-            var service = OpenServiceW(scm, serviceName, SERVICE_QUERY_STATUS);
+            var service = OpenServiceW(scm, serviceName, access);
             if (!service.IsInvalid) return service;
             var error = Marshal.GetLastWin32Error();
             service.Dispose();
@@ -48,6 +54,22 @@ internal static class NativeServices
             return (Status)status.dwCurrentState;
         }
 
+        public bool RequestStop()
+        {
+            if (ControlService(this, SERVICE_CONTROL_STOP, out _)) return true;
+            var error = Marshal.GetLastWin32Error();
+            if (error is ERROR_SERVICE_NOT_ACTIVE or ERROR_SERVICE_CANNOT_ACCEPT_CTRL or ERROR_INVALID_SERVICE_CONTROL) return false;
+            throw new System.ComponentModel.Win32Exception(error);
+        }
+
+        public void DeleteStopped()
+        {
+            if (QueryStatus() != Status.Stopped) throw new InvalidOperationException("Der Tunnel-Dienst läuft noch.");
+            if (DeleteService(this)) return;
+            var error = Marshal.GetLastWin32Error();
+            if (error != ERROR_SERVICE_MARKED_FOR_DELETE) throw new System.ComponentModel.Win32Exception(error);
+        }
+
         protected override bool ReleaseHandle() => CloseServiceHandle(handle);
     }
 
@@ -65,48 +87,16 @@ internal static class NativeServices
                 SERVICE_WIN32_OWN_PROCESS, autostart ? SERVICE_AUTO_START : SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
                 binaryPathName, null, IntPtr.Zero, "Nsi\0TcpIp\0\0", null, null);
             if (service.IsInvalid) throw new System.ComponentModel.Win32Exception();
-            try
-            {
-                // Laut WireGuard zwingend: ohne "unrestricted" SID-Typ greifen Firewall-Regeln (Kill-Switch) nicht.
-                var sidInfo = SERVICE_SID_TYPE_UNRESTRICTED;
-                if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_SERVICE_SID_INFO, ref sidInfo))
-                    throw new System.ComponentModel.Win32Exception();
-                var desc = new SERVICE_DESCRIPTION { lpDescription = description };
-                if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, ref desc))
-                    throw new System.ComponentModel.Win32Exception();
-                if (!StartServiceW(service, 0, IntPtr.Zero))
-                    throw new System.ComponentModel.Win32Exception();
-            }
-            catch
-            {
-                DeleteService(service);
-                throw;
-            }
-        }
-        finally { CloseServiceHandle(scm); }
-    }
-
-    /// <summary>Stoppt den Dienst und markiert ihn zum Löschen (Windows entfernt ihn, sobald er beendet ist).</summary>
-    /// <returns>false, wenn der Dienst nicht (mehr) existiert.</returns>
-    public static bool StopAndDelete(string name)
-    {
-        var scm = OpenSCManagerW(null, null, SC_MANAGER_CONNECT);
-        if (scm == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
-        try
-        {
-            using var service = OpenServiceW(scm, name, SERVICE_QUERY_STATUS | SERVICE_STOP | DELETE);
-            if (service.IsInvalid)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error is ERROR_SERVICE_DOES_NOT_EXIST or ERROR_SERVICE_MARKED_FOR_DELETE) return false;
-                throw new System.ComponentModel.Win32Exception(error);
-            }
-            if (!DeleteService(service) && Marshal.GetLastWin32Error() is var delError && delError != ERROR_SERVICE_MARKED_FOR_DELETE)
-                throw new System.ComponentModel.Win32Exception(delError);
-            if (!ControlService(service, SERVICE_CONTROL_STOP, out _) &&
-                Marshal.GetLastWin32Error() is var stopError && stopError is not (ERROR_SERVICE_NOT_ACTIVE or ERROR_SERVICE_CANNOT_ACCEPT_CTRL))
-                throw new System.ComponentModel.Win32Exception(stopError);
-            return true;
+            // Laut WireGuard zwingend: ohne "unrestricted" SID-Typ greifen Firewall-Regeln (Kill-Switch) nicht.
+            var sidInfo = SERVICE_SID_TYPE_UNRESTRICTED;
+            if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_SERVICE_SID_INFO, ref sidInfo))
+                throw new System.ComponentModel.Win32Exception();
+            var desc = new SERVICE_DESCRIPTION { lpDescription = description };
+            if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, ref desc))
+                throw new System.ComponentModel.Win32Exception();
+            if (!StartServiceW(service, 0, IntPtr.Zero))
+                throw new System.ComponentModel.Win32Exception();
+            // Bei einem Fehler räumt ConnectAsync den Dienst über den regulären Stopp-Pfad auf.
         }
         finally { CloseServiceHandle(scm); }
     }
@@ -129,6 +119,7 @@ internal static class NativeServices
     const uint SERVICE_SID_TYPE_UNRESTRICTED = 1;
     const int ERROR_SERVICE_NOT_ACTIVE = 1062;
     const int ERROR_SERVICE_CANNOT_ACCEPT_CTRL = 1061;
+    const int ERROR_INVALID_SERVICE_CONTROL = 1052;
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern ServiceHandle CreateServiceW(IntPtr scm, string name, string displayName, uint access, uint type,

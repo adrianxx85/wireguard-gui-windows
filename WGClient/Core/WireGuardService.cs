@@ -38,14 +38,20 @@ public static class WireGuardService
 
     static string ServiceRegistryPath(string tunnel) => @"SYSTEM\CurrentControlSet\Services\" + ServiceName(tunnel);
 
-    static bool IsOwned(string tunnel)
+    enum ServiceBackend { Official, Embedded }
+
+    static bool IsOwned(string tunnel) => GetBackend(tunnel) is not null;
+
+    static ServiceBackend? GetBackend(string tunnel)
     {
         using var key = Registry.LocalMachine.OpenSubKey(ServiceRegistryPath(tunnel));
-        if (key?.GetValue("ImagePath") is not string imagePath) return false;
+        if (key?.GetValue("ImagePath") is not string imagePath) return null;
         // Beide Editionen erkennen die Dienste der jeweils anderen, damit ein Wechsel keine Tunnel verwaist.
         var config = TunnelStore.ActivePath(tunnel);
-        return string.Equals(imagePath, $"{QuotePath(WireGuardExe)} /tunnelservice {QuotePath(config)}", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(imagePath, EmbeddedTunnel.ServiceCommandLine(config), StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(imagePath, $"{QuotePath(WireGuardExe)} /tunnelservice {QuotePath(config)}", StringComparison.OrdinalIgnoreCase))
+            return ServiceBackend.Official;
+        return string.Equals(imagePath, EmbeddedTunnel.ServiceCommandLine(config), StringComparison.OrdinalIgnoreCase)
+            ? ServiceBackend.Embedded : null;
     }
 
     // WireGuard's service installer quotes executable and configuration paths when they contain whitespace.
@@ -69,6 +75,7 @@ public static class WireGuardService
         {
             if (!IsOwned(tunnel))
                 throw new InvalidOperationException($"Ein anderer WireGuard-Dienst verwendet bereits den Namen \"{tunnel}\".");
+            if (Embedded) EmbeddedTunnel.VerifyInstallation();
             await DisconnectAsync(tunnel);
             // Vor dem Neuanlegen muss der alte Dienst wirklich entfernt sein, sonst schlägt die Installation fehl.
             if (!await WaitUntilAsync(() => !IsServiceInstalled(tunnel), RemoveTimeout))
@@ -120,25 +127,26 @@ public static class WireGuardService
     public static async Task DisconnectAsync(string tunnel)
     {
         if (!IsOwned(tunnel)) return;
-        // Ein vorhandenes Handle bleibt zur Statusabfrage gültig, wenn WireGuard den Dienst zum Löschen markiert.
-        using var service = NativeServices.OpenForQuery(ServiceName(tunnel), out var markedForDeletion);
+        using var service = NativeServices.OpenForRemoval(ServiceName(tunnel), out var markedForDeletion);
         if (service is not null)
         {
-            if (Embedded || !OfficialInstalled)
-                await Task.Run(() => NativeServices.StopAndDelete(ServiceName(tunnel)));
-            else
+            var stopRequested = false;
+            var stopped = await Task.Run(() => WaitUntilAsync(() =>
             {
-                var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
-                if (code != 0)
-                    throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
+                var status = service.QueryStatus();
+                if (status == NativeServices.Status.Stopped) return true;
+                if (!stopRequested && status is not (NativeServices.Status.StartPending or NativeServices.Status.StopPending))
+                    stopRequested = service.RequestStop();
+                return false;
+            }, RemoveTimeout));
+            if (stopped)
+            {
+                service.DeleteStopped();
+                return;
             }
         }
-        else if (!markedForDeletion) return;
-
-        if (!await WaitUntilAsync(() => service is not null
-                ? service.QueryStatus() == NativeServices.Status.Stopped
-                : !IsServiceInstalled(tunnel), RemoveTimeout))
-            throw new TimeoutException($"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestoppt.");
+        else if (!markedForDeletion || await WaitUntilAsync(() => !IsServiceInstalled(tunnel), RemoveTimeout)) return;
+        throw new TimeoutException($"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestoppt.");
     }
 
     public static async Task<TunnelStats?> GetStatsAsync(string tunnel)
@@ -165,20 +173,18 @@ public static class WireGuardService
 
     public static async Task<string> DumpLogAsync(string? tunnelFilter, int maxLines = 400)
     {
-        string[] lines;
-        if (Embedded)
-            lines = [.. await Task.Run(EmbeddedTunnel.ReadLog)];
-        else
+        var backend = string.IsNullOrEmpty(tunnelFilter) ? null : GetBackend(tunnelFilter);
+        var lines = new List<string>();
+        if (backend != ServiceBackend.Official)
+            lines.AddRange(await Task.Run(EmbeddedTunnel.ReadLog));
+        if (backend != ServiceBackend.Embedded && File.Exists(WireGuardExe))
         {
-            EnsureInstalled();
             var (_, output) = await RunAsync(WireGuardExe, "/dumplog");
-            lines = output.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            lines.AddRange(output.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries));
         }
-        IEnumerable<string> filtered = lines;
-        if (!string.IsNullOrEmpty(tunnelFilter))
-            filtered = lines.Where(l => l.Contains($"[{tunnelFilter}]", StringComparison.OrdinalIgnoreCase));
-        var list = filtered.ToList();
-        return string.Join(Environment.NewLine, list.Skip(Math.Max(0, list.Count - maxLines)));
+        return string.Join(Environment.NewLine, lines
+            .Where(line => string.IsNullOrEmpty(tunnelFilter) || line.Contains($"[{tunnelFilter}]", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal).TakeLast(maxLines));
     }
 
     static void EnsureInstalled()

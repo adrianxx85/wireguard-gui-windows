@@ -46,8 +46,9 @@ public sealed class MainVm : ObservableObject
         {
             try
             {
-                var cfg = WgConfig.Parse(_store.ReadOriginal(name));
-                var opts = _store.ReadOptions(name) ?? TunnelOptions.FromConfig(cfg);
+                var profile = _store.ReadProfile(name);
+                var cfg = WgConfig.Parse(profile.Config);
+                var opts = profile.Options ?? TunnelOptions.FromConfig(cfg);
                 opts.UpdateImportedDefaults(cfg);
                 Tunnels.Add(new TunnelVm(name, cfg, opts));
             }
@@ -92,8 +93,8 @@ public sealed class MainVm : ObservableObject
         }
 
         var opts = TunnelOptions.FromConfig(cfg);
-        _store.SaveOriginal(name, text);
-        _store.SaveOptions(name, opts);
+        var vm = existing ?? new TunnelVm(name, cfg, opts) { State = WireGuardService.GetState(name) };
+        _store.SaveProfile(name, text, opts);
 
         if (existing is not null)
         {
@@ -104,7 +105,6 @@ public sealed class MainVm : ObservableObject
             return existing;
         }
 
-        var vm = new TunnelVm(name, cfg, opts) { State = WireGuardService.GetState(name) };
         var idx = 0;
         while (idx < Tunnels.Count && string.Compare(Tunnels[idx].Name, name, StringComparison.OrdinalIgnoreCase) < 0) idx++;
         Tunnels.Insert(idx, vm);
@@ -144,7 +144,7 @@ public sealed class MainVm : ObservableObject
         if (!t.TryGetOptions(out var opts, out var error))
             throw new InvalidOperationException(error);
 
-        _store.SaveOptions(t.Name, opts);
+        _store.SaveProfile(t.Name, _store.ReadProfile(t.Name).Config, opts);
         t.ApplySaved(opts);
         StatusMessage = $"Einstellungen für \"{t.Name}\" gespeichert.";
 

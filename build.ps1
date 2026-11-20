@@ -15,9 +15,12 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish fehlgeschlagen" }
 $isccArgs = @('/Q')
 if ($Standalone) {
     $native = "$root\native\bin\amd64"
-    if (-not ((Test-Path "$native\tunnel.dll") -and (Test-Path "$native\wireguard.dll"))) {
-        Write-Host "==> WireGuard-Bausteine bauen (native\build-native.ps1)" -ForegroundColor Cyan
-        & "$root\native\build-native.ps1"
+    & "$root\native\build-native.ps1"
+    $manifest = Get-Content -LiteralPath (Join-Path $native 'manifest.json') -Raw | ConvertFrom-Json
+    foreach ($file in @('tunnel.dll', 'wireguard.dll', 'LICENSE-wireguard-nt.txt', 'LICENSE-wireguard-windows.txt')) {
+        if ((Get-FileHash -LiteralPath (Join-Path $native $file)).Hash -ne $manifest.Files.$file) {
+            throw "Native Datei nach dem Build verändert: $file."
+        }
     }
     $isccArgs += '/DStandalone'
 }

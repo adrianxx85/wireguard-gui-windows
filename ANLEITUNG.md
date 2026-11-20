@@ -33,11 +33,14 @@ Zwei Editionen:
     selbst mit (tunnel.dll aus dem offiziellen Quellcode, signierter
     WireGuard-Treiber wireguard.dll). Eine zusätzliche WireGuard-App wird
     nicht installiert; WG Client richtet die Tunnel-Dienste selbst ein.
+    Der Dienst braucht einen geschützten Programmordner, zum Beispiel den
+    Standardpfad unter Programme. Unsichere Installationspfade werden abgelehnt.
     Sicherheits-Updates von WireGuard kommen hier mit neuen Versionen von
     WG Client, nicht über den WireGuard-Updater.
   Beide lassen sich gegeneinander austauschen (einfach das andere Setup
   installieren). Laufende Tunnel der Standalone-Edition werden beim Update
-  kurz angehalten und danach wieder gestartet. Beim Wechsel zur
+  kurz angehalten und danach wieder gestartet. Bricht das Setup ab, versucht
+  es, die zuvor aktiven Tunnel wieder zu starten und meldet Fehler dabei. Beim Wechsel zur
   Standard-Edition werden sie getrennt und müssen neu verbunden werden.
 
 
@@ -111,6 +114,9 @@ Optionen
 Konfiguration
   Zeigt die Konfiguration, mit der der Tunnel tatsächlich gestartet wird
   (private Schlüssel ausgeblendet). "Exportieren" speichert sie als .conf.
+  Ab Version 1.3.1 speichert WG Client Konfiguration und Optionen gemeinsam
+  in einer Profildatei. Vor einem Downgrade die benötigten Tunnel als .conf
+  exportieren und in der älteren Version erneut importieren.
   "Server-Block kopieren" kopiert den [Peer]-Block für den WireGuard-Server.
   Hat das Profil mehrere Peers, wähle zuerst die Gegenstelle anhand ihres
   öffentlichen Schlüssels oder Endpoints. Der Block enthält den öffentlichen
@@ -120,6 +126,8 @@ Konfiguration
 
 Log
   Das WireGuard-Protokoll – hilfreich, wenn eine Verbindung nicht klappt.
+  Beim Wechsel zwischen den Editionen liest WG Client die Logquelle des
+  jeweiligen Tunnel-Dienstes.
 
 
 4. Optionen erklärt
@@ -231,9 +239,9 @@ Ergebnis:
   dist\WGClient-Setup-<Version>.exe            Installer (Standard)
   dist\WGClient-Standalone-Setup-<Version>.exe Installer (Standalone)
 
-Für -Standalone baut native\build-native.ps1 beim ersten Mal tunnel.dll aus
-wireguard-windows (gepinnter Tag) und lädt die signierte wireguard.dll.
-Go und llvm-mingw lädt das Skript selbst und prüft die SHA-256-Summen aus dem
-offiziellen build.bat.
+Für -Standalone baut native\build-native.ps1 tunnel.dll bei jedem Build aus
+dem gepinnten WireGuard-Commit. Go, llvm-mingw und WireGuardNT werden gegen die
+SHA-256-Summen aus dem offiziellen build.bat geprüft. Der Build prüft außerdem
+die Windows-Signatur von wireguard.dll und die Prüfsummen vor dem Packen.
 
 Die Version wird in WGClient\WGClient.csproj (<Version>) gepflegt.

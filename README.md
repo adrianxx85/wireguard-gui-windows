@@ -52,7 +52,9 @@ WG Client bringt keine eigene VPN-Implementierung mit, sondern steuert die offiz
 Beim Verbinden wird aus Original-Konfiguration + Optionen eine effektive `.conf` erzeugt und per
 `wireguard.exe /installtunnelservice` als Tunnel-Dienst gestartet. Status und Traffic kommen von `wg show`.
 
-In der Standalone-Edition ist `WGClient.exe /service <conf>` selbst der Tunnel-Dienst und ruft
+In der Standalone-Edition startet der Tunnel-Dienst nur aus einem Programmordner, dessen Dateien und Verzeichnisse
+vor Änderungen durch Standardbenutzer geschützt sind. Der Standardpfad unter `Programme` erfüllt diese Voraussetzung.
+`WGClient.exe /service <conf>` ist selbst der Tunnel-Dienst und ruft
 `WireGuardTunnelService` aus `tunnel.dll` auf. Status und Traffic liest die App über `WireGuardGetConfiguration`
 (`wireguard.dll`), das Log aus dem Ringlogger `log.bin`. Schlüssel erzeugen beide Editionen per Windows-CNG (X25519).
 
@@ -65,8 +67,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Ergebnis: `publish\WGClient.exe` (App) und `dist\WGClient-Setup-<Version>.exe` (Installer).
-Mit `build.ps1 -Standalone` entsteht `dist\WGClient-Standalone-Setup-<Version>.exe`; die WireGuard-Bausteine baut dabei
-`native\build-native.ps1` (lädt Go/llvm-mingw mit den Prüfsummen aus dem offiziellen `build.bat`).
+Mit `build.ps1 -Standalone` entsteht `dist\WGClient-Standalone-Setup-<Version>.exe`. `native\build-native.ps1`
+baut `tunnel.dll` frisch aus dem gepinnten WireGuard-Commit. Der Build prüft die Werkzeugarchive, die Signatur von
+`wireguard.dll` und die Prüfsummen der Dateien vor dem Packen.
 
 | Pfad | Inhalt |
 |---|---|

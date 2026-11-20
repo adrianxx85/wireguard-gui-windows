@@ -24,7 +24,11 @@ public static class EmbeddedTunnel
     {
         // Nur die Dateien aus dem Programmordner laden – nie eine gleichnamige DLL aus dem Suchpfad.
         NativeLibrary.SetDllImportResolver(typeof(EmbeddedTunnel).Assembly, (name, _, _) =>
-            name is TunnelDll or DriverDll ? NativeLibrary.Load(Path.Combine(AppDir, name)) : IntPtr.Zero);
+        {
+            if (name is not (TunnelDll or DriverDll)) return IntPtr.Zero;
+            VerifyInstallation();
+            return NativeLibrary.Load(Path.Combine(AppDir, name));
+        });
     }
 
     static string ExePath => Environment.ProcessPath ?? throw new InvalidOperationException("Programmpfad unbekannt.");
@@ -32,9 +36,14 @@ public static class EmbeddedTunnel
     /// <summary>Befehlszeile des Tunnel-Dienstes (immer mit Anführungszeichen, wie im Installer geprüft).</summary>
     public static string ServiceCommandLine(string configPath) => $"\"{ExePath}\" {ServiceSwitch} \"{configPath}\"";
 
-    public static void Install(string tunnel, string configPath, bool autostart) =>
+    public static void VerifyInstallation() => ServiceFiles.Verify(ExePath, Path.Combine(AppDir, TunnelDll), Path.Combine(AppDir, DriverDll));
+
+    public static void Install(string tunnel, string configPath, bool autostart)
+    {
+        VerifyInstallation();
         NativeServices.CreateAndStart(WireGuardService.ServiceName(tunnel), $"WG Client Tunnel: {tunnel}",
             "WireGuard-Tunnel, eingerichtet von WG Client.", ServiceCommandLine(configPath), autostart);
+    }
 
     // ---------- Dienstprozess ----------
 
@@ -49,6 +58,8 @@ public static class EmbeddedTunnel
         // Nur Konfigurationen aus dem geschützten Speicher von WG Client akzeptieren.
         if (!string.Equals(Path.GetDirectoryName(full), TunnelStore.ActiveDirectory, StringComparison.OrdinalIgnoreCase))
             return 2;
+        VerifyInstallation();
+        TunnelStore.VerifyActiveConfig(full);
         return WireGuardTunnelService(full) ? 0 : 1;
     }
 

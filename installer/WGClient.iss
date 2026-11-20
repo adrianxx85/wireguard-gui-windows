@@ -1,7 +1,6 @@
 ; Installer für WG Client (Inno Setup 6)
 ; Bauen: ..\build.ps1  (oder ISCC.exe WGClient.iss nach dotnet publish)
 ; Standalone-Edition (ohne WireGuard-App, mit tunnel.dll/wireguard.dll): ..\build.ps1 -Standalone
-;   bzw. ISCC.exe /DStandalone WGClient.iss nach native\build-native.ps1
 
 #define MyAppName "WG Client"
 #define MyAppExe "WGClient.exe"
@@ -221,53 +220,128 @@ begin
     and (CompareText(ImagePath, '"' + ExpandConstant('{app}\{#MyAppExe}') + '" /service "' + ConfigPath + '"') = 0);
 end;
 
-function ScQuery(const Name, State: String): Boolean;
-var
-  ResultCode: Integer;
-begin
-  { sc.exe gibt die Zustände unabhängig von der Systemsprache englisch aus (z. B. "4  RUNNING") }
-  Result := Exec(ExpandConstant('{cmd}'), '/c ""' + ExpandConstant('{sys}\sc.exe') + '" query "WireGuardTunnel$' + Name +
-    '" | "' + ExpandConstant('{sys}\find.exe') + '" "' + State + '" >nul"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-    and (ResultCode = 0);
-end;
+const
+  Stopped = 1;
+  StartPending = 2;
+  StopPending = 3;
+  Running = 4;
 
-procedure Sc(const Args: String);
-var
-  ResultCode: Integer;
-begin
-  Exec(ExpandConstant('{sys}\sc.exe'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
+type
+  TServiceStatus = record
+    ServiceType, CurrentState, ControlsAccepted, Win32ExitCode,
+      ServiceSpecificExitCode, CheckPoint, WaitHint: LongWord;
+  end;
 
-{ Stoppt einen eigenen Tunnel-Dienst und wartet (max. 30 s), bis er die Programmdateien freigibt. }
-procedure StopEmbeddedTunnel(const Name: String);
+function OpenSCManager(Machine, Database: LongWord; Access: LongWord): THandle;
+  external 'OpenSCManagerW@advapi32.dll stdcall';
+function OpenService(Manager: THandle; Name: String; Access: LongWord): THandle;
+  external 'OpenServiceW@advapi32.dll stdcall';
+function QueryServiceStatus(Service: THandle; var Status: TServiceStatus): BOOL;
+  external 'QueryServiceStatus@advapi32.dll stdcall';
+function CloseServiceHandle(Service: THandle): BOOL;
+  external 'CloseServiceHandle@advapi32.dll stdcall';
+function GetTickCount64: Int64;
+  external 'GetTickCount64@kernel32.dll stdcall';
+
+function TunnelState(const Name: String): Integer;
 var
-  I: Integer;
+  Manager, Service: THandle;
+  Status: TServiceStatus;
 begin
-  Sc('stop "WireGuardTunnel$' + Name + '"');
-  for I := 1 to 120 do
-  begin
-    if not RegKeyExists(HKLM, ServiceKey(Name)) or ScQuery(Name, 'STOPPED') then Exit;
-    Sleep(250);
+  Result := 0;
+  Manager := OpenSCManager(0, 0, 1); { SC_MANAGER_CONNECT }
+  if Manager = 0 then Exit;
+  try
+    Service := OpenService(Manager, 'WireGuardTunnel$' + Name, 4); { SERVICE_QUERY_STATUS }
+    if Service = 0 then Exit;
+    try
+      if QueryServiceStatus(Service, Status) then Result := Status.CurrentState;
+    finally
+      CloseServiceHandle(Service);
+    end;
+  finally
+    CloseServiceHandle(Manager);
   end;
 end;
 
-procedure StopAppTunnels;
+function Sc(const Action, Name: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\sc.exe'), Action + ' "WireGuardTunnel$' + Name + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if not Result then Log('sc.exe ' + Action + ' fehlgeschlagen für ' + Name + ': ' + IntToStr(ResultCode));
+end;
+
+function StopTunnel(const Name: String): Boolean;
+var
+  Deadline: Int64;
+  State: Integer;
+  StopSent: Boolean;
+begin
+  StopSent := False;
+  Deadline := GetTickCount64 + 30000;
+  repeat
+    State := TunnelState(Name);
+    Result := (State = Stopped) or not RegKeyExists(HKLM, ServiceKey(Name));
+    if Result then Exit;
+    if not StopSent and (State >= Running) then StopSent := Sc('stop', Name);
+    Sleep(250);
+  until GetTickCount64 >= Deadline;
+end;
+
+function StartTunnel(const Name: String): Boolean;
+var
+  Deadline: Int64;
+  State: Integer;
+begin
+  Result := False;
+  Deadline := GetTickCount64 + 60000;
+  State := TunnelState(Name);
+  while (State = StopPending) and (GetTickCount64 < Deadline) do
+  begin
+    Sleep(250);
+    State := TunnelState(Name);
+  end;
+  if (State = Stopped) and not Sc('start', Name) then Exit;
+  repeat
+    State := TunnelState(Name);
+    Result := State = Running;
+    if Result or (State = Stopped) or (State = 0) then Exit;
+    Sleep(250);
+  until GetTickCount64 >= Deadline;
+end;
+
+function VerifyEmbeddedInstallation: Boolean;
+var
+  Exe, Target: String;
+  ResultCode: Integer;
+begin
+  Exe := ExpandConstant('{tmp}\{#MyAppExe}');
+  Target := ExpandConstant('{app}\{#MyAppExe}');
+  Result := False;
+  try
+    if not FileExists(Exe) then ExtractTemporaryFile('{#MyAppExe}');
+    Result := Exec(Exe, '/verify-service-files "' + Target + '"', ExpandConstant('{tmp}'), SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  except
+    Log(GetExceptionMessage);
+  end;
+end;
+
+function StopAppTunnels: Boolean;
 var
   FindRec: TFindRec;
   Name: String;
-  ResultCode: Integer;
 begin
+  Result := True;
   if FindFirst(ActiveDir + '*.conf', FindRec) then
   try
     repeat
       Name := ChangeFileExt(FindRec.Name, '');
-      if FileExists(WireGuardExe) and IsWireGuardAppTunnel(Name, ActiveDir + FindRec.Name) then
-        Exec(WireGuardExe, '/uninstalltunnelservice "' + Name + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-      else if IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
-      begin
-        StopEmbeddedTunnel(Name);
-        Sc('delete "WireGuardTunnel$' + Name + '"');
-      end;
+      if IsWireGuardAppTunnel(Name, ActiveDir + FindRec.Name) or IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
+        if not (StopTunnel(Name) and (not RegKeyExists(HKLM, ServiceKey(Name)) or Sc('delete', Name))) then
+          Result := False;
     until not FindNext(FindRec);
   finally
     FindClose(FindRec);
@@ -278,24 +352,68 @@ end;
 
 var
   RestartTunnels, EmbeddedTunnels: TStringList;
+  PostInstallReached, TunnelUpdateFailed, AllTunnelsStopped: Boolean;
+
+procedure ReportTunnelUpdateFailure(const Message: String);
+begin
+  TunnelUpdateFailed := True;
+  Log(Message);
+  if not WizardSilent then MsgBox(Message, mbError, MB_OK);
+end;
+
+procedure RestartSavedTunnels;
+var
+  I: Integer;
+begin
+  if RestartTunnels = nil then Exit;
+  if RestartTunnels.Count = 0 then Exit;
+  if not VerifyEmbeddedInstallation then
+  begin
+    ReportTunnelUpdateFailure('Die Tunnel-Dienste konnten nicht neu gestartet werden. Der Programmordner ist unsicher oder unvollständig.');
+    Exit;
+  end;
+  for I := RestartTunnels.Count - 1 downto 0 do
+    if StartTunnel(RestartTunnels[I]) then
+      RestartTunnels.Delete(I)
+    else
+      ReportTunnelUpdateFailure('Tunnel "' + RestartTunnels[I] + '" konnte nicht neu gestartet werden.');
+end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   FindRec: TFindRec;
   Name: String;
+  Verified: Boolean;
+  State: Integer;
 begin
   Result := '';
-  RestartTunnels := TStringList.Create;
-  EmbeddedTunnels := TStringList.Create;
+  if RestartTunnels = nil then RestartTunnels := TStringList.Create;
+  if EmbeddedTunnels = nil then EmbeddedTunnels := TStringList.Create;
+  Verified := False;
   if FindFirst(ActiveDir + '*.conf', FindRec) then
   try
     repeat
       Name := ChangeFileExt(FindRec.Name, '');
       if IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
       begin
-        EmbeddedTunnels.Add(Name);
-        if ScQuery(Name, 'RUNNING') then RestartTunnels.Add(Name);
-        StopEmbeddedTunnel(Name);
+        if not Verified then
+        begin
+          if not VerifyEmbeddedInstallation then
+          begin
+            Result := 'Der Programmordner der Standalone-Edition ist unsicher oder unvollständig. WG Client unter Programme neu installieren.';
+            Exit;
+          end;
+          Verified := True;
+        end;
+        if EmbeddedTunnels.IndexOf(Name) < 0 then EmbeddedTunnels.Add(Name);
+        State := TunnelState(Name);
+        if (State >= StartPending) and (State <> StopPending) and (RestartTunnels.IndexOf(Name) < 0) then RestartTunnels.Add(Name);
+        if (State = 0) or not StopTunnel(Name) then
+        begin
+          RestartSavedTunnels;
+          Result := 'Tunnel "' + Name + '" konnte nicht gestoppt werden. Das Update wurde angehalten.';
+          Exit;
+        end;
       end;
     until not FindNext(FindRec);
   finally
@@ -304,18 +422,35 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+#ifndef Standalone
 var
   I: Integer;
+#endif
 begin
-  if (CurStep <> ssPostInstall) or (RestartTunnels = nil) then Exit;
+  if CurStep <> ssPostInstall then Exit;
+  PostInstallReached := True;
+  if EmbeddedTunnels = nil then Exit;
 #ifdef Standalone
-  for I := 0 to RestartTunnels.Count - 1 do
-    Sc('start "WireGuardTunnel$' + RestartTunnels[I] + '"');
+  RestartSavedTunnels;
 #else
   { Die Standard-Edition kann eigene Tunnel-Dienste nicht ausführen: entfernen, neu verbinden über WireGuard }
   for I := 0 to EmbeddedTunnels.Count - 1 do
-    Sc('delete "WireGuardTunnel$' + EmbeddedTunnels[I] + '"');
+    if RegKeyExists(HKLM, ServiceKey(EmbeddedTunnels[I])) and
+      ((TunnelState(EmbeddedTunnels[I]) <> Stopped) or not Sc('delete', EmbeddedTunnels[I])) then
+      ReportTunnelUpdateFailure('Der alte Dienst für Tunnel "' + EmbeddedTunnels[I] + '" konnte nicht entfernt werden.');
 #endif
+end;
+
+procedure DeinitializeSetup;
+begin
+  if not PostInstallReached then RestartSavedTunnels;
+  if RestartTunnels <> nil then RestartTunnels.Free;
+  if EmbeddedTunnels <> nil then EmbeddedTunnels.Free;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if TunnelUpdateFailed then Result := 40 else Result := 0;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -324,9 +459,13 @@ var
 begin
   DataDir := ExpandConstant('{commonappdata}\WGClient');
   if CurUninstallStep = usUninstall then
-    StopAppTunnels; { von WG Client gestartete Tunnel trennen }
+  begin
+    AllTunnelsStopped := StopAppTunnels;
+    if not AllTunnelsStopped then
+      RaiseException('Mindestens ein Tunnel-Dienst konnte nicht gestoppt und entfernt werden.');
+  end;
 
-  if (CurUninstallStep = usPostUninstall) and DirExists(DataDir) and not UninstallSilent then
+  if (CurUninstallStep = usPostUninstall) and AllTunnelsStopped and DirExists(DataDir) and not UninstallSilent then
     if MsgBox('Gespeicherte Tunnel-Konfigurationen (inkl. privater Schlüssel) ebenfalls löschen?' + #13#10#13#10 +
               'Wähle "Nein", wenn du WG Client später wieder installieren und die Tunnel behalten möchtest.',
               mbConfirmation, MB_YESNO) = IDYES then

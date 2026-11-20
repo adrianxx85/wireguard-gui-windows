@@ -142,29 +142,63 @@ public sealed partial class TunnelStore
     }
 
     public IEnumerable<string> ListNames() =>
-        Directory.GetFiles(TunnelsDir, "*.conf")
-                 .Select(f => Path.GetFileNameWithoutExtension(f))
-                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+        Directory.EnumerateFiles(TunnelsDir, "*" + ProfileExtension)
+            .Select(file => Path.GetFileName(file)[..^ProfileExtension.Length])
+            .Concat(Directory.EnumerateFiles(TunnelsDir, "*.conf").Select(file => Path.GetFileNameWithoutExtension(file)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase);
 
-    public string ReadOriginal(string name) => File.ReadAllText(CheckedFile(Path.Combine(TunnelsDir, name + ".conf")));
+    const string ProfileExtension = ".wgprofile";
+    static string ProfilePath(string name) => Path.Combine(TunnelsDir, name + ProfileExtension);
 
-    public void SaveOriginal(string name, string text) => WriteProtectedFile(Path.Combine(TunnelsDir, name + ".conf"), text);
+    public sealed record Profile(string Config, TunnelOptions? Options);
 
-    public TunnelOptions? ReadOptions(string name)
+    public Profile ReadProfile(string name)
     {
+        var profile = CheckedFile(ProfilePath(name), out var hasProfile);
+        if (hasProfile)
+        {
+            var saved = JsonSerializer.Deserialize<Profile>(File.ReadAllText(profile), Json);
+            if (saved?.Config is null || saved.Options is null) throw new IOException("Das Tunnelprofil ist unvollständig.");
+            return saved;
+        }
+
+        var config = File.ReadAllText(CheckedFile(Path.Combine(TunnelsDir, name + ".conf")));
         var path = CheckedFile(Path.Combine(TunnelsDir, name + ".json"));
-        if (!File.Exists(path)) return null;
-        try { return JsonSerializer.Deserialize<TunnelOptions>(File.ReadAllText(path), Json); }
-        catch (JsonException) { return null; }
+        if (!File.Exists(path)) return new Profile(config, null);
+        try { return new Profile(config, JsonSerializer.Deserialize<TunnelOptions>(File.ReadAllText(path), Json)); }
+        catch (JsonException) { return new Profile(config, null); }
     }
 
-    public void SaveOptions(string name, TunnelOptions options) =>
-        WriteProtectedFile(Path.Combine(TunnelsDir, name + ".json"), JsonSerializer.Serialize(options, Json));
+    public void SaveProfile(string name, string config, TunnelOptions options)
+    {
+        var path = CheckedFile(ProfilePath(name));
+        var staged = Path.Combine(TunnelsDir, $"{Guid.NewGuid():N}.tmp");
+        try
+        {
+            WriteProtectedFile(staged, JsonSerializer.Serialize(new Profile(config, options), Json));
+            File.Move(staged, path, overwrite: true);
+        }
+        finally { File.Delete(staged); }
+    }
 
     public static string ActivePath(string name) => Path.Combine(ActiveDir, name + ".conf");
 
     /// <summary>Ordner der effektiven Konfigurationen (Standalone: dort liegt auch das Tunnel-Log log.bin).</summary>
     public static string ActiveDirectory => ActiveDir;
+
+    internal static void VerifyActiveConfig(string path)
+    {
+        foreach (var directory in new[] { new DirectoryInfo(Root), new DirectoryInfo(ActiveDir) })
+        {
+            RejectReparsePoint(directory);
+            VerifySecurity(directory, directory.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+        }
+        CheckedFile(path, out var exists);
+        if (!exists || !string.Equals(Path.GetExtension(path), ".conf", StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Die aktive Tunnel-Konfiguration fehlt oder ist ungültig.");
+        CheckedFile(Path.Combine(ActiveDir, "log.bin"));
+    }
 
     /// <summary>Schreibt die effektive Konfiguration; der Dateiname bestimmt den Tunnelnamen.</summary>
     public void WriteActive(string name, string text) => WriteProtectedFile(ActivePath(name), text);
@@ -176,6 +210,7 @@ public sealed partial class TunnelStore
                      Path.Combine(TunnelsDir, name + ".conf"),
                      Path.Combine(TunnelsDir, name + ".json"),
                      ActivePath(name),
+                     ProfilePath(name),
                  })
         {
             File.Delete(CheckedFile(path));
