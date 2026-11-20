@@ -1,5 +1,7 @@
 ; Installer für WG Client (Inno Setup 6)
 ; Bauen: ..\build.ps1  (oder ISCC.exe WGClient.iss nach dotnet publish)
+; Standalone-Edition (ohne WireGuard-App, mit tunnel.dll/wireguard.dll): ..\build.ps1 -Standalone
+;   bzw. ISCC.exe /DStandalone WGClient.iss nach native\build-native.ps1
 
 #define MyAppName "WG Client"
 #define MyAppExe "WGClient.exe"
@@ -13,7 +15,11 @@
 AppId={{8F3C2A51-6B7E-4D2A-9C1F-3E5B7A9D4C21}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+#ifdef Standalone
+AppVerName={#MyAppName} {#MyAppVersion} (Standalone)
+#else
 AppVerName={#MyAppName} {#MyAppVersion}
+#endif
 AppPublisher={#MyPublisher}
 AppPublisherURL={#CoffeeUrl}
 DefaultDirName={autopf}\WG Client
@@ -24,7 +30,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist
+#ifdef Standalone
+OutputBaseFilename=WGClient-Standalone-Setup-{#MyAppVersion}
+#else
 OutputBaseFilename=WGClient-Setup-{#MyAppVersion}
+#endif
 SetupIconFile=..\WGClient\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 UninstallDisplayName={#MyAppName}
@@ -45,6 +55,20 @@ Name: "openwith"; Description: ".conf-Dateien im Menü ""Öffnen mit"" anbieten"
 [Files]
 Source: "..\publish\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\ANLEITUNG.md"; DestDir: "{app}"; DestName: "Anleitung.txt"; Flags: ignoreversion
+#ifdef Standalone
+; WireGuard-Bausteine: tunnel.dll (MIT, aus wireguard-windows gebaut) und wireguard.dll (signiert, wireguard-nt)
+Source: "..\native\bin\amd64\tunnel.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\native\bin\amd64\wireguard.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\native\bin\amd64\LICENSE-wireguard-windows.txt"; DestDir: "{app}\Lizenzen"; Flags: ignoreversion
+Source: "..\native\bin\amd64\LICENSE-wireguard-nt.txt"; DestDir: "{app}\Lizenzen"; Flags: ignoreversion
+#else
+
+[InstallDelete]
+; Wechsel von der Standalone- zur Standard-Edition: eingebettete Bausteine entfernen
+Type: files; Name: "{app}\tunnel.dll"
+Type: files; Name: "{app}\wireguard.dll"
+Type: filesandordirs; Name: "{app}\Lizenzen"
+#endif
 
 [Icons]
 Name: "{autoprograms}\WG Client"; Filename: "{app}\{#MyAppExe}"
@@ -61,7 +85,9 @@ Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExe}\SupportedTypes"; V
 
 [Run]
 Filename: "{tmp}\dotnet-desktop-runtime.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installiere .NET 10 Desktop Runtime ..."; Check: ShouldInstallDotNet; Flags: waituntilterminated
+#ifndef Standalone
 Filename: "{tmp}\wireguard-installer.exe"; StatusMsg: "Installiere WireGuard ..."; Check: ShouldInstallWireGuard; Flags: waituntilterminated
+#endif
 Filename: "{app}\{#MyAppExe}"; Description: "WG Client jetzt starten"; Flags: postinstall nowait skipifsilent runascurrentuser
 Filename: "{#CoffeeUrl}"; Description: "Gefällt dir WG Client? Spendier mir einen Kaffee (PayPal)"; Flags: postinstall shellexec nowait skipifsilent unchecked
 
@@ -101,7 +127,11 @@ end;
 function InitializeSetup: Boolean;
 begin
   NeedDotNet := not IsDotNetInstalled;
+#ifdef Standalone
+  NeedWireGuard := False; { Standalone bringt die WireGuard-Bausteine selbst mit }
+#else
   NeedWireGuard := not FileExists(WireGuardExe);
+#endif
   Result := True;
 end;
 
@@ -163,32 +193,129 @@ begin
     Result := Path;
 end;
 
-function IsOwnedTunnel(const Name, ConfigPath: String): Boolean;
+function ServiceKey(const Name: String): String;
+begin
+  Result := 'SYSTEM\CurrentControlSet\Services\WireGuardTunnel$' + Name;
+end;
+
+function ActiveDir: String;
+begin
+  Result := ExpandConstant('{commonappdata}\WGClient\active\');
+end;
+
+{ Dienst der offiziellen WireGuard-App (Standard-Edition) }
+function IsWireGuardAppTunnel(const Name, ConfigPath: String): Boolean;
 var
   ImagePath: String;
 begin
-  Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\WireGuardTunnel$' + Name, 'ImagePath', ImagePath)
+  Result := RegQueryStringValue(HKLM, ServiceKey(Name), 'ImagePath', ImagePath)
     and (CompareText(ImagePath, QuoteServicePath(WireGuardExe) + ' /tunnelservice ' + QuoteServicePath(ConfigPath)) = 0);
+end;
+
+// Eigener Tunnel-Dienst (Standalone-Edition): "<app>\WGClient.exe" /service "<conf>" – siehe EmbeddedTunnel.cs
+function IsEmbeddedTunnel(const Name, ConfigPath: String): Boolean;
+var
+  ImagePath: String;
+begin
+  Result := RegQueryStringValue(HKLM, ServiceKey(Name), 'ImagePath', ImagePath)
+    and (CompareText(ImagePath, '"' + ExpandConstant('{app}\{#MyAppExe}') + '" /service "' + ConfigPath + '"') = 0);
+end;
+
+function ScQuery(const Name, State: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  { sc.exe gibt die Zustände unabhängig von der Systemsprache englisch aus (z. B. "4  RUNNING") }
+  Result := Exec(ExpandConstant('{cmd}'), '/c ""' + ExpandConstant('{sys}\sc.exe') + '" query "WireGuardTunnel$' + Name +
+    '" | "' + ExpandConstant('{sys}\find.exe') + '" "' + State + '" >nul"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
+procedure Sc(const Args: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ Stoppt einen eigenen Tunnel-Dienst und wartet (max. 30 s), bis er die Programmdateien freigibt. }
+procedure StopEmbeddedTunnel(const Name: String);
+var
+  I: Integer;
+begin
+  Sc('stop "WireGuardTunnel$' + Name + '"');
+  for I := 1 to 120 do
+  begin
+    if not RegKeyExists(HKLM, ServiceKey(Name)) or ScQuery(Name, 'STOPPED') then Exit;
+    Sleep(250);
+  end;
 end;
 
 procedure StopAppTunnels;
 var
   FindRec: TFindRec;
-  Name, ActiveDir: String;
+  Name: String;
   ResultCode: Integer;
 begin
-  if not FileExists(WireGuardExe) then Exit;
-  ActiveDir := ExpandConstant('{commonappdata}\WGClient\active\');
   if FindFirst(ActiveDir + '*.conf', FindRec) then
   try
     repeat
       Name := ChangeFileExt(FindRec.Name, '');
-      if IsOwnedTunnel(Name, ActiveDir + FindRec.Name) then
-        Exec(WireGuardExe, '/uninstalltunnelservice "' + Name + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if FileExists(WireGuardExe) and IsWireGuardAppTunnel(Name, ActiveDir + FindRec.Name) then
+        Exec(WireGuardExe, '/uninstalltunnelservice "' + Name + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+      else if IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
+      begin
+        StopEmbeddedTunnel(Name);
+        Sc('delete "WireGuardTunnel$' + Name + '"');
+      end;
     until not FindNext(FindRec);
   finally
     FindClose(FindRec);
   end;
+end;
+
+{ ---------- Update: eigene Tunnel-Dienste sperren WGClient.exe und tunnel.dll ---------- }
+
+var
+  RestartTunnels, EmbeddedTunnels: TStringList;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  FindRec: TFindRec;
+  Name: String;
+begin
+  Result := '';
+  RestartTunnels := TStringList.Create;
+  EmbeddedTunnels := TStringList.Create;
+  if FindFirst(ActiveDir + '*.conf', FindRec) then
+  try
+    repeat
+      Name := ChangeFileExt(FindRec.Name, '');
+      if IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
+      begin
+        EmbeddedTunnels.Add(Name);
+        if ScQuery(Name, 'RUNNING') then RestartTunnels.Add(Name);
+        StopEmbeddedTunnel(Name);
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  I: Integer;
+begin
+  if (CurStep <> ssPostInstall) or (RestartTunnels = nil) then Exit;
+#ifdef Standalone
+  for I := 0 to RestartTunnels.Count - 1 do
+    Sc('start "WireGuardTunnel$' + RestartTunnels[I] + '"');
+#else
+  { Die Standard-Edition kann eigene Tunnel-Dienste nicht ausführen: entfernen, neu verbinden über WireGuard }
+  for I := 0 to EmbeddedTunnels.Count - 1 do
+    Sc('delete "WireGuardTunnel$' + EmbeddedTunnels[I] + '"');
+#endif
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

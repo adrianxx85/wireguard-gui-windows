@@ -33,6 +33,13 @@
 Unter [Releases](../../releases) das aktuelle `WGClient-Setup-x.y.z.exe` herunterladen und ausführen.
 Fehlen [WireGuard für Windows](https://www.wireguard.com/install/) oder die .NET 10 Desktop Runtime, lädt das Setup sie automatisch nach.
 
+**Editionen:**
+
+| Setup | WireGuard |
+|---|---|
+| `WGClient-Setup-x.y.z.exe` | nutzt die offizielle WireGuard-App (wird bei Bedarf mitinstalliert) |
+| `WGClient-Standalone-Setup-x.y.z.exe` | bringt `tunnel.dll` (aus [wireguard-windows](https://git.zx2c4.com/wireguard-windows), embeddable-dll-service) und die signierte `wireguard.dll` ([wireguard-nt](https://git.zx2c4.com/wireguard-nt)) mit, ohne zusätzliche App |
+
 > Das Setup ist nicht signiert. Zeigt Windows SmartScreen eine Warnung, auf **Weitere Informationen → Trotzdem ausführen** klicken.
 
 Ausführliche Bedienungsanleitung: [ANLEITUNG.md](ANLEITUNG.md)
@@ -45,6 +52,10 @@ WG Client bringt keine eigene VPN-Implementierung mit, sondern steuert die offiz
 Beim Verbinden wird aus Original-Konfiguration + Optionen eine effektive `.conf` erzeugt und per
 `wireguard.exe /installtunnelservice` als Tunnel-Dienst gestartet. Status und Traffic kommen von `wg show`.
 
+In der Standalone-Edition ist `WGClient.exe /service <conf>` selbst der Tunnel-Dienst und ruft
+`WireGuardTunnelService` aus `tunnel.dll` auf. Status und Traffic liest die App über `WireGuardGetConfiguration`
+(`wireguard.dll`), das Log aus dem Ringlogger `log.bin`. Schlüssel erzeugen beide Editionen per Windows-CNG (X25519).
+
 ## Selbst bauen
 
 Benötigt: [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) und [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`)
@@ -54,6 +65,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Ergebnis: `publish\WGClient.exe` (App) und `dist\WGClient-Setup-<Version>.exe` (Installer).
+Mit `build.ps1 -Standalone` entsteht `dist\WGClient-Standalone-Setup-<Version>.exe`; die WireGuard-Bausteine baut dabei
+`native\build-native.ps1` (lädt Go/llvm-mingw mit den Prüfsummen aus dem offiziellen `build.bat`).
 
 | Pfad | Inhalt |
 |---|---|

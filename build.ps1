@@ -1,5 +1,8 @@
 # Baut WG Client und den Installer.
-# Ergebnis: publish\WGClient.exe und dist\WGClient-Setup-<Version>.exe
+#   build.ps1              -> dist\WGClient-Setup-<Version>.exe            (nutzt die installierte WireGuard-App)
+#   build.ps1 -Standalone  -> dist\WGClient-Standalone-Setup-<Version>.exe (bringt tunnel.dll/wireguard.dll mit)
+# Ergebnis der App: publish\WGClient.exe (fuer beide Editionen identisch)
+param([switch]$Standalone)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -9,6 +12,16 @@ dotnet publish "$root\WGClient\WGClient.csproj" -c Release -r win-x64 --self-con
     -p:PublishSingleFile=true -o "$root\publish"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish fehlgeschlagen" }
 
+$isccArgs = @('/Q')
+if ($Standalone) {
+    $native = "$root\native\bin\amd64"
+    if (-not ((Test-Path "$native\tunnel.dll") -and (Test-Path "$native\wireguard.dll"))) {
+        Write-Host "==> WireGuard-Bausteine bauen (native\build-native.ps1)" -ForegroundColor Cyan
+        & "$root\native\build-native.ps1"
+    }
+    $isccArgs += '/DStandalone'
+}
+
 $iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -17,7 +30,7 @@ $iscc = @(
 if (-not $iscc) { throw "Inno Setup 6 nicht gefunden. Installieren mit: winget install JRSoftware.InnoSetup" }
 
 Write-Host "==> Installer bauen" -ForegroundColor Cyan
-& $iscc /Q "$root\installer\WGClient.iss"
+& $iscc @isccArgs "$root\installer\WGClient.iss"
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup fehlgeschlagen" }
 
 Get-ChildItem "$root\dist\*.exe" | Sort-Object LastWriteTime | Select-Object -Last 1 |

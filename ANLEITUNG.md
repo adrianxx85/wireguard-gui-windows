@@ -26,6 +26,20 @@ einstellen, ohne die Datei von Hand zu bearbeiten.
 
 Voraussetzungen: Windows 10 oder 11 (64 Bit), Administratorrechte.
 
+Zwei Editionen:
+  - "WGClient-Setup-x.y.z.exe" nutzt die offizielle WireGuard-App und
+    installiert sie bei Bedarf mit.
+  - "WGClient-Standalone-Setup-x.y.z.exe" bringt die WireGuard-Bausteine
+    selbst mit (tunnel.dll aus dem offiziellen Quellcode, signierter
+    WireGuard-Treiber wireguard.dll). Eine zusätzliche WireGuard-App wird
+    nicht installiert; WG Client richtet die Tunnel-Dienste selbst ein.
+    Sicherheits-Updates von WireGuard kommen hier mit neuen Versionen von
+    WG Client, nicht über den WireGuard-Updater.
+  Beide lassen sich gegeneinander austauschen (einfach das andere Setup
+  installieren). Laufende Tunnel der Standalone-Edition werden beim Update
+  kurz angehalten und danach wieder gestartet. Beim Wechsel zur
+  Standard-Edition werden sie getrennt und müssen neu verbunden werden.
+
 
 2. Erste Schritte
 -----------------
@@ -210,9 +224,16 @@ https://paypal.me/AdrianZblewski  ☕
 Benötigt: .NET 10 SDK, Inno Setup 6 (winget install JRSoftware.InnoSetup)
 
   powershell -ExecutionPolicy Bypass -File build.ps1
+  powershell -ExecutionPolicy Bypass -File build.ps1 -Standalone
 
 Ergebnis:
-  publish\WGClient.exe              die App (eine Datei)
-  dist\WGClient-Setup-<Version>.exe der Installer
+  publish\WGClient.exe                         die App (eine Datei)
+  dist\WGClient-Setup-<Version>.exe            Installer (Standard)
+  dist\WGClient-Standalone-Setup-<Version>.exe Installer (Standalone)
+
+Für -Standalone baut native\build-native.ps1 beim ersten Mal tunnel.dll aus
+wireguard-windows (gepinnter Tag) und lädt die signierte wireguard.dll.
+Go und llvm-mingw lädt das Skript selbst und prüft die SHA-256-Summen aus dem
+offiziellen build.bat.
 
 Die Version wird in WGClient\WGClient.csproj (<Version>) gepflegt.

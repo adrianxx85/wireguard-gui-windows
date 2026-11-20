@@ -163,6 +163,9 @@ public sealed partial class TunnelStore
 
     public static string ActivePath(string name) => Path.Combine(ActiveDir, name + ".conf");
 
+    /// <summary>Ordner der effektiven Konfigurationen (Standalone: dort liegt auch das Tunnel-Log log.bin).</summary>
+    public static string ActiveDirectory => ActiveDir;
+
     /// <summary>Schreibt die effektive Konfiguration; der Dateiname bestimmt den Tunnelnamen.</summary>
     public void WriteActive(string name, string text) => WriteProtectedFile(ActivePath(name), text);
 

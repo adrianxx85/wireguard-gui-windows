@@ -8,7 +8,10 @@ public enum TunnelState { Disconnected, Starting, Running, Stopping }
 
 public sealed record TunnelStats(DateTimeOffset? LastHandshake, long RxBytes, long TxBytes, string? Endpoint);
 
-/// <summary>Steuert Tunnel über die offizielle WireGuard-Installation (wireguard.exe / wg.exe).</summary>
+/// <summary>
+/// Steuert Tunnel über die offizielle WireGuard-Installation (wireguard.exe / wg.exe) oder – in der
+/// Standalone-Edition – über eigene Tunnel-Dienste mit tunnel.dll/wireguard.dll (<see cref="EmbeddedTunnel"/>).
+/// </summary>
 public static class WireGuardService
 {
     static readonly string InstallDir =
@@ -16,7 +19,12 @@ public static class WireGuardService
 
     public static string WireGuardExe => Path.Combine(InstallDir, "wireguard.exe");
     public static string WgExe => Path.Combine(InstallDir, "wg.exe");
-    public static bool IsInstalled => File.Exists(WireGuardExe) && File.Exists(WgExe);
+    static bool OfficialInstalled => File.Exists(WireGuardExe) && File.Exists(WgExe);
+
+    /// <summary>Standalone-Edition: Tunnel-Bausteine liegen neben WGClient.exe.</summary>
+    public static bool Embedded { get; } = EmbeddedTunnel.IsAvailable;
+
+    public static bool IsInstalled => Embedded || OfficialInstalled;
 
     public static string ServiceName(string tunnel) => "WireGuardTunnel$" + tunnel;
 
@@ -34,8 +42,10 @@ public static class WireGuardService
     {
         using var key = Registry.LocalMachine.OpenSubKey(ServiceRegistryPath(tunnel));
         if (key?.GetValue("ImagePath") is not string imagePath) return false;
-        var expected = $"{QuotePath(WireGuardExe)} /tunnelservice {QuotePath(TunnelStore.ActivePath(tunnel))}";
-        return string.Equals(imagePath, expected, StringComparison.OrdinalIgnoreCase);
+        // Beide Editionen erkennen die Dienste der jeweils anderen, damit ein Wechsel keine Tunnel verwaist.
+        var config = TunnelStore.ActivePath(tunnel);
+        return string.Equals(imagePath, $"{QuotePath(WireGuardExe)} /tunnelservice {QuotePath(config)}", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(imagePath, EmbeddedTunnel.ServiceCommandLine(config), StringComparison.OrdinalIgnoreCase);
     }
 
     // WireGuard's service installer quotes executable and configuration paths when they contain whitespace.
@@ -69,12 +79,17 @@ public static class WireGuardService
         writeConfig();
         try
         {
-            var (code, output) = await RunAsync(WireGuardExe, "/installtunnelservice", TunnelStore.ActivePath(tunnel));
-            if (code != 0)
-                throw new InvalidOperationException($"wireguard.exe hat den Tunnel nicht gestartet (Code {code}). {output}".Trim());
+            if (Embedded)
+                await Task.Run(() => EmbeddedTunnel.Install(tunnel, TunnelStore.ActivePath(tunnel), autostart));
+            else
+            {
+                var (code, output) = await RunAsync(WireGuardExe, "/installtunnelservice", TunnelStore.ActivePath(tunnel));
+                if (code != 0)
+                    throw new InvalidOperationException($"wireguard.exe hat den Tunnel nicht gestartet (Code {code}). {output}".Trim());
+            }
 
             // WireGuard legt den Dienst mit Starttyp "Automatisch" an.
-            if (!autostart)
+            if (!Embedded && !autostart)
             {
                 if (!IsOwned(tunnel)) throw new InvalidOperationException($"Der Dienst für \"{tunnel}\" wurde nicht gefunden.");
                 var (scCode, scOutput) = await RunAsync(Path.Combine(Environment.SystemDirectory, "sc.exe"),
@@ -109,10 +124,14 @@ public static class WireGuardService
         using var service = NativeServices.OpenForQuery(ServiceName(tunnel), out var markedForDeletion);
         if (service is not null)
         {
-            EnsureInstalled();
-            var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
-            if (code != 0)
-                throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
+            if (Embedded || !OfficialInstalled)
+                await Task.Run(() => NativeServices.StopAndDelete(ServiceName(tunnel)));
+            else
+            {
+                var (code, output) = await RunAsync(WireGuardExe, "/uninstalltunnelservice", tunnel);
+                if (code != 0)
+                    throw new InvalidOperationException($"Tunnel konnte nicht getrennt werden (Code {code}). {output}".Trim());
+            }
         }
         else if (!markedForDeletion) return;
 
@@ -124,7 +143,8 @@ public static class WireGuardService
 
     public static async Task<TunnelStats?> GetStatsAsync(string tunnel)
     {
-        if (!IsInstalled) return null;
+        if (Embedded) return await Task.Run(() => EmbeddedTunnel.GetStats(tunnel));
+        if (!OfficialInstalled) return null;
         var (code, output) = await RunAsync(WgExe, "show", tunnel, "dump");
         if (code != 0) return null;
 
@@ -145,9 +165,15 @@ public static class WireGuardService
 
     public static async Task<string> DumpLogAsync(string? tunnelFilter, int maxLines = 400)
     {
-        EnsureInstalled();
-        var (_, output) = await RunAsync(WireGuardExe, "/dumplog");
-        var lines = output.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] lines;
+        if (Embedded)
+            lines = [.. await Task.Run(EmbeddedTunnel.ReadLog)];
+        else
+        {
+            EnsureInstalled();
+            var (_, output) = await RunAsync(WireGuardExe, "/dumplog");
+            lines = output.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        }
         IEnumerable<string> filtered = lines;
         if (!string.IsNullOrEmpty(tunnelFilter))
             filtered = lines.Where(l => l.Contains($"[{tunnelFilter}]", StringComparison.OrdinalIgnoreCase));
@@ -173,26 +199,19 @@ public static class WireGuardService
         return true;
     }
 
-    // ---------- Schlüssel (über wg.exe) ----------
+    // ---------- Schlüssel (X25519 über Windows-CNG, siehe WgKeys) ----------
 
     /// <summary>Erzeugt einen privaten Schlüssel bzw. mit <paramref name="preshared"/> einen Pre-shared Key.</summary>
-    public static async Task<string> GenerateKeyAsync(bool preshared = false)
-    {
-        EnsureInstalled();
-        var (code, output) = await RunAsync(WgExe, preshared ? "genpsk" : "genkey");
-        if (code != 0 || !WgValidation.IsKey(output))
-            throw new InvalidOperationException("Schlüssel konnte nicht erzeugt werden (wg.exe).");
-        return output.Trim();
-    }
+    public static Task<string> GenerateKeyAsync(bool preshared = false) =>
+        Task.FromResult(preshared ? WgKeys.GeneratePresharedKey() : WgKeys.GeneratePrivateKey());
 
-    public static async Task<string> PublicKeyAsync(string privateKey)
+    public static Task<string> PublicKeyAsync(string privateKey)
     {
-        EnsureInstalled();
-        // Privater Schlüssel nur über stdin, nie als Argument (wäre in der Prozessliste sichtbar).
-        var (code, output) = await RunCoreAsync(WgExe, ["pubkey"], privateKey.Trim() + "\n");
-        if (code != 0 || !WgValidation.IsKey(output))
-            throw new InvalidOperationException("Öffentlicher Schlüssel konnte nicht berechnet werden. Ist der private Schlüssel gültig?");
-        return output.Trim();
+        try { return Task.FromResult(WgKeys.PublicKey(privateKey)); }
+        catch (Exception ex) when (ex is ArgumentException or System.Security.Cryptography.CryptographicException)
+        {
+            throw new InvalidOperationException("Öffentlicher Schlüssel konnte nicht berechnet werden. Ist der private Schlüssel gültig?", ex);
+        }
     }
 
     static Task<(int ExitCode, string Output)> RunAsync(string exe, params string[] args) => RunCoreAsync(exe, args, null);
