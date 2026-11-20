@@ -48,7 +48,7 @@
                 </StackPanel>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                     <TextBlock Text="{Binding Error}" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="{Binding Info}" Style="{StaticResource Muted}"/>
+                    <TextBlock Text="{Binding Info}" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -125,7 +125,11 @@
                                  AutomationProperties.Name="Eigener öffentlicher Schlüssel"/>
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Gib diesen Schlüssel an die Gegenstelle weiter und trage ihren öffentlichen Schlüssel unten ein. Das Schlüsselpaar wird beim Abschließen des Assistenten gespeichert."/>
+                               Text="Gib diesen Schlüssel an die Gegenstelle weiter und trage ihren öffentlichen Schlüssel unten ein. Lass den Assistenten bis dahin geöffnet: Das Schlüsselpaar wird erst mit „Tunnel erstellen“ gespeichert."/>
+                    <Border Background="#3A2A12" BorderBrush="#6A4A1E" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,0,0,14"
+                            Visibility="{Binding HasKeyNotice, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding KeyNotice}" TextWrapping="Wrap" Foreground="#F5C27A"/>
+                    </Border>
 
                     <TextBlock Text="{Binding PeerKeyLabel}" Style="{StaticResource FieldLabel}"/>
                     <TextBox Text="{Binding ServerPublicKey, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource KeyBox}"/>
@@ -197,7 +201,12 @@
                     </StackPanel>
 
                     <TextBlock Text="Öffentlicher Schlüssel dieses Geräts" Style="{StaticResource FieldLabel}" Margin="0,4,0,5"/>
-                    <TextBox Text="{Binding PublicKey, Mode=OneWay}" Style="{StaticResource KeyBox}" IsReadOnly="True"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Kopieren" Margin="8,0,0,0" Click="CopyPublicKey_Click"
+                                AutomationProperties.Name="Eigenen öffentlichen Schlüssel kopieren"/>
+                        <TextBox Text="{Binding PublicKey, Mode=OneWay}" Style="{StaticResource KeyBox}" IsReadOnly="True"
+                                 AutomationProperties.Name="Öffentlicher Schlüssel dieses Geräts"/>
+                    </DockPanel>
 
                     <TextBlock Text="Konfiguration dieses Geräts" Style="{StaticResource SubHeader}" Margin="0,18,0,8"/>
                     <TextBox Text="{Binding ConfigPreview, Mode=OneWay}" Style="{StaticResource CodeBox}" MaxHeight="230"/>

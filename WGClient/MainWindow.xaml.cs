@@ -120,16 +120,15 @@ public partial class MainWindow : Window
 
     void NewTunnel_Click(object sender, RoutedEventArgs e)
     {
-        var wizard = new NewTunnelWindow(_vm.NameExists, _vm.TunnelAddresses()) { Owner = this };
-        if (wizard.ShowDialog() != true || wizard.Result is not { } result) return;
-        try
-        {
-            var t = _vm.Add(result.Name, result.Config, _ => false)
-                    ?? throw new InvalidOperationException($"Ein Tunnel \"{result.Name}\" existiert bereits.");
-            _vm.Selected = t;
-            _vm.StatusMessage = $"\"{t.Name}\" erstellt. Sobald der Peer auf dem Server eingetragen ist, kannst du verbinden.";
-        }
-        catch (Exception ex) { ShowError("Tunnel konnte nicht erstellt werden", ex); }
+        TunnelVm? created = null;
+        // Gespeichert wird noch im Assistenten: Schlägt es fehl, bleibt er mit dem Schlüsselpaar offen.
+        var wizard = new NewTunnelWindow(_vm.NameExists, _vm.TunnelAddresses(), (name, config) =>
+            created = _vm.Add(name, config, _ => false)
+                ?? throw new InvalidOperationException($"Ein Tunnel \"{name}\" existiert bereits. Bitte unter „Zurück“ einen anderen Namen wählen."))
+        { Owner = this };
+        if (wizard.ShowDialog() != true || created is null) return;
+        _vm.Selected = created;
+        _vm.StatusMessage = $"\"{created.Name}\" erstellt. Sobald der Peer auf dem Server eingetragen ist, kannst du verbinden.";
     }
 
     void ImportFile(string path)

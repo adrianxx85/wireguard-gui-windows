@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using WGClient.ViewModels;
 
@@ -6,16 +7,18 @@ namespace WGClient;
 public partial class NewTunnelWindow : Window
 {
     readonly NewTunnelVm _vm;
+    readonly Action<string, string> _create;
+    bool _saved;
 
-    public NewTunnelWindow(Func<string, bool> nameExists, IEnumerable<string> tunnelAddresses)
+    /// <param name="create">Speichert den fertigen Tunnel (Name, Konfiguration). Wirft bei Fehlern –
+    /// der Assistent bleibt dann offen, damit das Schlüsselpaar nicht verloren geht.</param>
+    public NewTunnelWindow(Func<string, bool> nameExists, IEnumerable<string> tunnelAddresses, Action<string, string> create)
     {
         InitializeComponent();
+        _create = create;
         _vm = new NewTunnelVm(nameExists, tunnelAddresses);
         DataContext = _vm;
     }
-
-    /// <summary>Name und Konfiguration, wenn der Assistent mit "Tunnel erstellen" abgeschlossen wurde.</summary>
-    public (string Name, string Config)? Result => _vm.Result;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -23,9 +26,35 @@ public partial class NewTunnelWindow : Window
         DarkTitleBar.Apply(this);
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || _saved || !_vm.HasUnsavedGeneratedKey) return;
+        var answer = MessageBox.Show(this,
+            "Der Tunnel wurde noch nicht erstellt. Beim Schließen geht das erzeugte Schlüsselpaar verloren – " +
+            "ein bereits weitergegebener öffentlicher Schlüssel ist dann nutzlos.\n\nAssistent trotzdem schließen?",
+            "Neuen Tunnel erstellen", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) e.Cancel = true;
+    }
+
     async void Next_Click(object sender, RoutedEventArgs e)
     {
-        if (await _vm.NextAsync()) { DialogResult = true; return; }
+        if (await _vm.NextAsync())
+        {
+            if (_vm.Result is not { } result) return;
+            try
+            {
+                _create(result.Name, result.Config);
+            }
+            catch (Exception ex)
+            {
+                _vm.Error = "Tunnel konnte nicht erstellt werden: " + ex.Message;
+                return;
+            }
+            _saved = true;
+            DialogResult = true;
+            return;
+        }
         if (_vm.IsStep1 && _vm.Name.Length == 0)
             _ = Dispatcher.BeginInvoke(() => NameBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
@@ -36,17 +65,21 @@ public partial class NewTunnelWindow : Window
 
     async void GeneratePsk_Click(object sender, RoutedEventArgs e) => await _vm.GeneratePresharedKeyAsync();
 
-    void CopyPublicKey_Click(object sender, RoutedEventArgs e) => Copy(_vm.PublicKey, "Öffentlicher Schlüssel");
+    // Der öffentliche Schlüssel ist nicht geheim: normale Zwischenablage (inkl. Verlauf/Synchronisierung zum Weitergeben).
+    void CopyPublicKey_Click(object sender, RoutedEventArgs e) =>
+        Copy(() => Clipboard.SetDataObject(_vm.PublicKey, copy: true), "Öffentlicher Schlüssel");
 
-    void CopySnippet_Click(object sender, RoutedEventArgs e) => Copy(_vm.ServerSnippetForCopy(), "[Peer]-Block");
+    void CopySnippet_Click(object sender, RoutedEventArgs e) =>
+        Copy(() => PrivateClipboard.SetText(_vm.ServerSnippetForCopy()), "[Peer]-Block");
 
-    void CopyInterface_Click(object sender, RoutedEventArgs e) => Copy(_vm.InterfaceSuggestion, "[Interface]-Vorschlag");
+    void CopyInterface_Click(object sender, RoutedEventArgs e) =>
+        Copy(() => PrivateClipboard.SetText(_vm.InterfaceSuggestion), "[Interface]-Vorschlag");
 
-    void Copy(string text, string what)
+    void Copy(Action copy, string what)
     {
         try
         {
-            PrivateClipboard.SetText(text);
+            copy();
             _vm.Info = $"{what} in die Zwischenablage kopiert.";
         }
         catch (Exception ex) { _vm.Error = "Kopieren fehlgeschlagen: " + ex.Message; }

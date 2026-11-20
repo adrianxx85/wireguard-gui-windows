@@ -357,9 +357,22 @@ public sealed class NewTunnelVm : ObservableObject
         else key = _generatedKey ??= await WireGuardService.GenerateKeyAsync();
 
         if (key == _privateKey) return;
+        var previous = PublicKey;
         PublicKey = await WireGuardService.PublicKeyAsync(key);
+        // Schritt 2 hat den alten öffentlichen Schlüssel schon angezeigt – evtl. ist er bereits weitergegeben.
+        if (_privateKey is not null)
+            KeyNotice = $"Der öffentliche Schlüssel hat sich geändert (vorher {previous}). " +
+                        "Hast du den alten schon weitergegeben, schicke der Gegenstelle bitte den neuen.";
         _privateKey = key;
     }
+
+    string _keyNotice = "";
+    /// <summary>Hinweis, wenn sich der bereits angezeigte öffentliche Schlüssel nachträglich geändert hat.</summary>
+    public string KeyNotice { get => _keyNotice; private set { if (Set(ref _keyNotice, value)) OnPropertyChanged(nameof(HasKeyNotice)); } }
+    public bool HasKeyNotice => KeyNotice.Length > 0;
+
+    /// <summary>true, wenn ein vom Assistenten erzeugtes (noch nirgends gespeichertes) Schlüsselpaar in Gebrauch ist.</summary>
+    public bool HasUnsavedGeneratedKey => _privateKey is not null && _privateKey == _generatedKey;
 
     // ---------- Erzeugen ----------
 

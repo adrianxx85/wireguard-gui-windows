@@ -60,7 +60,13 @@ Neuen Tunnel erstellen (ohne .conf-Datei)
   3. Server bzw. Gegenstelle: Kopiere zuerst deinen eigenen öffentlichen
      Schlüssel und tausche ihn mit der Gegenstelle aus. Lass den Assistenten
      bis zur Antwort geöffnet, damit das noch ungespeicherte Schlüsselpaar
-     erhalten bleibt. Trage danach den öffentlichen Schlüssel der Gegenstelle
+     erhalten bleibt – vor dem Schließen fragt WG Client nach. Der öffentliche
+     Schlüssel ist nicht geheim und landet ganz normal in der Zwischenablage
+     (auch im Verlauf mit Windows+V). Änderst du danach im Schritt "Dieses
+     Gerät" den Schlüssel, weist der Assistent darauf hin, dass die Gegenstelle
+     den neuen öffentlichen Schlüssel braucht. Lässt sich der Tunnel am Ende
+     nicht speichern (z. B. Name inzwischen vergeben), bleibt der Assistent
+     offen. Trage danach den öffentlichen Schlüssel der Gegenstelle
      und ihren Endpoint (host:port oder [IPv6-Adresse]:port) ein. Pre-shared
      Key und Keepalive sind optional.
      Für Point-to-Site gib die Netze hinter dem Server ein. Für Point-to-Point
