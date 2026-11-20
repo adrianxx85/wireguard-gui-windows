@@ -135,7 +135,8 @@ public static class WireGuardService
             {
                 var status = service.QueryStatus();
                 if (status == NativeServices.Status.Stopped) return true;
-                if (!stopRequested && status is not (NativeServices.Status.StartPending or NativeServices.Status.StopPending))
+                // Auch während des Starts erneut versuchen: Der Dienst nimmt Stopp an, sobald er Steuerbefehle akzeptiert.
+                if (!stopRequested && status != NativeServices.Status.StopPending)
                     stopRequested = service.RequestStop();
                 return false;
             }, RemoveTimeout));
@@ -144,6 +145,9 @@ public static class WireGuardService
                 service.DeleteStopped();
                 return;
             }
+            // Nicht rechtzeitig gestoppt: zum Löschen markieren, damit der Dienst spätestens beim Stopp verschwindet
+            // und nicht beim nächsten Windows-Start (Autostart) wieder verbindet.
+            service.MarkForDeletion();
         }
         else if (!markedForDeletion || await WaitUntilAsync(() => !IsServiceInstalled(tunnel), RemoveTimeout)) return;
         throw new TimeoutException($"Der Dienst für \"{tunnel}\" wurde nicht rechtzeitig gestoppt.");
@@ -171,6 +175,8 @@ public static class WireGuardService
         return new TunnelStats(handshake > 0 ? DateTimeOffset.FromUnixTimeSeconds(handshake) : null, rx, tx, endpoint);
     }
 
+    const int LogStampLength = 26; // "yyyy-MM-dd HH:mm:ss.ffffff"
+
     public static async Task<string> DumpLogAsync(string? tunnelFilter, int maxLines = 400)
     {
         var backend = string.IsNullOrEmpty(tunnelFilter) ? null : GetBackend(tunnelFilter);
@@ -182,9 +188,12 @@ public static class WireGuardService
             var (_, output) = await RunAsync(WireGuardExe, "/dumplog");
             lines.AddRange(output.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries));
         }
+        // Beide Quellen sind in sich chronologisch und nutzen dasselbe Zeitformat (Mikrosekunden).
+        // Stabil nur nach dem Zeitstempel sortieren, damit Zeilen derselben Zeit ihre Reihenfolge behalten.
         return string.Join(Environment.NewLine, lines
             .Where(line => string.IsNullOrEmpty(tunnelFilter) || line.Contains($"[{tunnelFilter}]", StringComparison.OrdinalIgnoreCase))
-            .Order(StringComparer.Ordinal).TakeLast(maxLines));
+            .OrderBy(line => line.Length >= LogStampLength ? line[..LogStampLength] : line, StringComparer.Ordinal)
+            .TakeLast(maxLines));
     }
 
     static void EnsureInstalled()

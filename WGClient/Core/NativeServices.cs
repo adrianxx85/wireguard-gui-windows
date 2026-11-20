@@ -65,6 +65,12 @@ internal static class NativeServices
         public void DeleteStopped()
         {
             if (QueryStatus() != Status.Stopped) throw new InvalidOperationException("Der Tunnel-Dienst läuft noch.");
+            MarkForDeletion();
+        }
+
+        /// <summary>Löscht den Dienst; läuft er noch, entfernt Windows ihn, sobald er stoppt.</summary>
+        public void MarkForDeletion()
+        {
             if (DeleteService(this)) return;
             var error = Marshal.GetLastWin32Error();
             if (error != ERROR_SERVICE_MARKED_FOR_DELETE) throw new System.ComponentModel.Win32Exception(error);

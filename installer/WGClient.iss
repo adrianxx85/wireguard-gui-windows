@@ -285,7 +285,8 @@ begin
     State := TunnelState(Name);
     Result := (State = Stopped) or not RegKeyExists(HKLM, ServiceKey(Name));
     if Result then Exit;
-    if not StopSent and (State >= Running) then StopSent := Sc('stop', Name);
+    { Auch im Startvorgang wiederholt versuchen: sc stop gelingt, sobald der Dienst Steuerbefehle annimmt }
+    if not StopSent and ((State = StartPending) or (State >= Running)) then StopSent := Sc('stop', Name);
     Sleep(250);
   until GetTickCount64 >= Deadline;
 end;
@@ -396,6 +397,11 @@ begin
       Name := ChangeFileExt(FindRec.Name, '');
       if IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
       begin
+#ifndef Standalone
+        { Die Standard-Edition stoppt und entfernt diese Dienste nur und startet nichts aus dem Programmordner.
+          Fehlen tunnel.dll/wireguard.dll schon (Reste eines früheren Wechsels), darf das Update nicht scheitern. }
+        Verified := True;
+#endif
         if not Verified then
         begin
           if not VerifyEmbeddedInstallation then

@@ -175,8 +175,9 @@ public static class EmbeddedTunnel
             var text = data.Slice(start + 8, LogLineText);
             var end = text.IndexOf((byte)0);
             if (end <= 0) continue;
-            var time = DateTimeOffset.FromUnixTimeMilliseconds(ns / 1_000_000).LocalDateTime;
-            lines.Add($"{time:yyyy-MM-dd HH:mm:ss.fff}: {Encoding.UTF8.GetString(text[..end])}");
+            // Gleiches Format wie "wireguard.exe /dumplog", damit sich beide Logs nach Zeit mischen lassen.
+            var time = DateTime.UnixEpoch.AddTicks(ns / 100).ToLocalTime();
+            lines.Add($"{time:yyyy-MM-dd HH:mm:ss.ffffff}: {Encoding.UTF8.GetString(text[..end])}");
         }
         return lines;
     }

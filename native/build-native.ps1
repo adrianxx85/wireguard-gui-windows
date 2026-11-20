@@ -16,7 +16,7 @@ $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 function Expand-VerifiedDependency([string]$file) {
     $pattern = "call :download $([regex]::Escape($file)) (\S+) ([0-9a-f]{64})"
     $line = $buildBat | Where-Object { $_ -match $pattern } | Select-Object -First 1
-    if (-not $line) { throw "Download-Eintrag für $file fehlt im gepinnten build.bat." }
+    if (-not $line) { throw "Download-Eintrag fuer $file fehlt im gepinnten build.bat." }
     $null = $line -match $pattern
     $url, $sha = $Matches[1], $Matches[2]
 
@@ -28,7 +28,7 @@ function Expand-VerifiedDependency([string]$file) {
         Write-Host "==> Lade $file"
         Invoke-WebRequest -Uri $url -OutFile $download -UseBasicParsing
     }
-    if ((Get-FileHash -LiteralPath $download).Hash -ne $sha) { throw "Falsche SHA-256-Prüfsumme für $file." }
+    if ((Get-FileHash -LiteralPath $download).Hash -ne $sha) { throw "Falsche SHA-256-Pruefsumme fuer $file." }
     if (!(Test-Path -LiteralPath $zip) -or (Get-FileHash -LiteralPath $zip).Hash -ne $sha) {
         Copy-Item -LiteralPath $download -Destination $zip -Force
     }
@@ -73,7 +73,7 @@ try {
     $driverRoot = Split-Path (Split-Path (Split-Path $driver -Parent) -Parent) -Parent
     $signature = Get-AuthenticodeSignature -LiteralPath $driver
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.GetNameInfo('SimpleName', $false) -ne 'WireGuard LLC') {
-        throw "Die WireGuardNT-Signatur ist ungültig: $($signature.Status)."
+        throw "Die WireGuardNT-Signatur ist ungueltig: $($signature.Status)."
     }
 
     $env:PATH = "$(Split-Path $go -Parent);$(Split-Path $cc -Parent);$env:PATH"
@@ -84,7 +84,8 @@ try {
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
     $env:CGO_ENABLED = '1'
-    $env:CC = $cc
+    # Nur den Namen setzen: cgo trennt CC an Leerzeichen; ueber den vorangestellten PATH-Eintrag wird der gepinnte gcc gefunden.
+    $env:CC = Split-Path $cc -Leaf
     $env:CGO_CFLAGS = '-O3 -Wall -Wno-unused-function -Wno-switch -std=gnu11 -DWINVER=0x0A00'
     $env:GOTOOLCHAIN = 'local'
     $env:GOENV = 'off'
@@ -117,7 +118,7 @@ try {
         Copy-Item -LiteralPath $artifact -Destination (Join-Path $out $file) -Force
     }
     @{ SourceCommit = $Commit; Files = $hashes } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'manifest.json')
-    Write-Host "==> Geprüfte native Dateien: $out" -ForegroundColor Green
+    Write-Host "==> Gepruefte native Dateien: $out" -ForegroundColor Green
 }
 finally {
     foreach ($name in $previousEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $previousEnv[$name], 'Process') }

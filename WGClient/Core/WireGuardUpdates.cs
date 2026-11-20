@@ -107,6 +107,8 @@ internal static class WireGuardUpdates
         throw new InvalidDataException("Für die neueste Version gibt es keinen passenden Standalone-Installer.");
     }
 
+    const int KilledByInstaller = unchecked((int)0xC000026B);
+
     public static async Task RunOfficialUpdaterAsync()
     {
         if (!await OfficialUpdater.WaitAsync(0).ConfigureAwait(false))
@@ -119,7 +121,10 @@ internal static class WireGuardUpdates
             start.ArgumentList.Add("/update");
             using var process = Process.Start(start) ?? throw new InvalidOperationException("WireGuard-Updater konnte nicht gestartet werden.");
             await process.WaitForExitAsync().ConfigureAwait(false);
-            if (process.ExitCode != 0) throw new InvalidOperationException($"Der WireGuard-Updater endete mit Code {process.ExitCode}.");
+            // Das WireGuard-MSI beendet beim Installieren alle wireguard.exe aus dem Programmordner – auch diesen
+            // Updater (KillWireGuardProcesses, Code STATUS_DLL_INIT_FAILED_LOGOFF). Ob das Update gelang, zeigt die Version.
+            if (process.ExitCode is not (0 or KilledByInstaller))
+                throw new InvalidOperationException($"Der WireGuard-Updater endete mit Code {process.ExitCode}.");
         }
         finally { OfficialUpdater.Release(); }
     }
