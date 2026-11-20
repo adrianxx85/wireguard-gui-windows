@@ -77,7 +77,11 @@
             </Border>
 
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="20,7">
-                <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{x:Static local:App.VersionLabel}" Style="{StaticResource Muted}"
+                               Margin="16,0,0,0" TextWrapping="NoWrap"/>
+                    <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                </DockPanel>
             </Border>
 
             <Grid>

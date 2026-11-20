@@ -103,6 +103,8 @@ Neuen Tunnel erstellen (ohne .conf-Datei)
 3. Die Bereiche im Überblick
 ----------------------------
 
+Die installierte Versionsnummer steht unten rechts in der Statusleiste.
+
 Übersicht
   Letzter Handshake, empfangene/gesendete Daten, Endpoint, Tunnel-Adresse,
   DNS und Routing auf einen Blick.

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -11,6 +12,9 @@ public partial class App : Application
     const string ShowEventName = "WGClientShowWindow";
 
     public const string CoffeeUrl = "https://paypal.me/AdrianZblewski";
+    public static string VersionLabel { get; } = "Version " +
+        (typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(App).Assembly.GetName().Version?.ToString() ?? "unbekannt");
 
     Mutex? _mutex;
     EventWaitHandle? _showEvent;
