@@ -7,6 +7,12 @@ public sealed class MainVm : ObservableObject
 {
     readonly TunnelStore _store = new();
     bool _refreshing;
+    int _logRequestVersion;
+
+    public MainVm()
+    {
+        Tunnels.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoTunnels));
+    }
 
     public ObservableCollection<TunnelVm> Tunnels { get; } = [];
 
@@ -18,12 +24,14 @@ public sealed class MainVm : ObservableObject
         {
             if (!Set(ref _selected, value)) return;
             OnPropertyChanged(nameof(HasSelection), nameof(NoSelection));
+            _logRequestVersion++;
             LogText = "";
         }
     }
 
     public bool HasSelection => Selected is not null;
     public bool NoSelection => Selected is null;
+    public bool HasNoTunnels => Tunnels.Count == 0;
     public bool WireGuardMissing => !WireGuardService.IsInstalled;
     public bool AnyActive => Tunnels.Any(t => t.IsActive);
 
@@ -138,7 +146,7 @@ public sealed class MainVm : ObservableObject
         StatusMessage = $"\"{t.Name}\" getrennt.";
     }
 
-    public async Task SaveAsync(TunnelVm t)
+    public async Task SaveAsync(TunnelVm t, bool reconnectIfActive = true)
     {
         EnsureIdle(t);
         if (!t.TryGetOptions(out var opts, out var error))
@@ -148,7 +156,15 @@ public sealed class MainVm : ObservableObject
         t.ApplySaved(opts);
         StatusMessage = $"Einstellungen für \"{t.Name}\" gespeichert.";
 
-        if (t.IsActive) await ConnectAsync(t); // neu verbinden, damit die Änderungen greifen
+        if (reconnectIfActive && t.IsActive)
+        {
+            try { await ConnectAsync(t); } // neu verbinden, damit die Änderungen greifen
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Einstellungen wurden gespeichert, aber das erneute Verbinden ist fehlgeschlagen: {ex.Message}", ex);
+            }
+        }
     }
 
     public async Task DeleteAsync(TunnelVm t)
@@ -166,15 +182,19 @@ public sealed class MainVm : ObservableObject
 
     public void Export(TunnelVm t, string path)
     {
-        var opts = t.TryGetOptions(out var o, out _) ? o : t.Saved;
+        if (!t.TryGetOptions(out var opts, out var error))
+            throw new InvalidOperationException(error ?? "Ungültige Optionen können nicht exportiert werden.");
         File.WriteAllText(path, ConfigBuilder.Build(t.Original, opts).Serialize());
         StatusMessage = $"Konfiguration exportiert nach {path}";
     }
 
     public async Task LoadLogAsync()
     {
+        var version = ++_logRequestVersion;
+        var filter = LogOnlySelected ? Selected?.Name : null;
         LogText = "Lade Log …";
-        var text = await WireGuardService.DumpLogAsync(LogOnlySelected ? Selected?.Name : null);
+        var text = await WireGuardService.DumpLogAsync(filter);
+        if (version != _logRequestVersion) return;
         LogText = string.IsNullOrWhiteSpace(text) ? "(keine Einträge)" : text;
     }
 
@@ -187,9 +207,20 @@ public sealed class MainVm : ObservableObject
             var before = AnyActive;
             foreach (var t in Tunnels.ToList())
             {
-                if (t.IsBusy) continue;
-                t.State = WireGuardService.GetState(t.Name);
-                t.Stats = t.State == TunnelState.Running ? await WireGuardService.GetStatsAsync(t.Name) : null;
+                if (t.IsBusy || !Tunnels.Contains(t)) continue;
+                var state = await Task.Run(() => WireGuardService.GetState(t.Name));
+                if (t.IsBusy || !Tunnels.Contains(t)) continue;
+                t.State = state;
+                if (state == TunnelState.Running)
+                {
+                    var stats = await WireGuardService.GetStatsAsync(t.Name);
+                    if (!t.IsBusy && t.State == TunnelState.Running && Tunnels.Contains(t))
+                        t.Stats = stats;
+                }
+                else
+                {
+                    t.Stats = null;
+                }
             }
             if (before != AnyActive) OnPropertyChanged(nameof(AnyActive));
             StatesChanged?.Invoke();

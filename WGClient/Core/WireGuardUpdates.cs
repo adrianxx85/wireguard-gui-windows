@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -13,6 +14,7 @@ internal static class WireGuardUpdates
     const string LatestRelease = "https://api.github.com/repos/" + Repository + "/releases/latest";
     const string InstallerDownloads = "https://github.com/" + Repository + "/releases/download/";
 
+    static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
     static readonly HttpClient Http = CreateHttpClient();
     static readonly SemaphoreSlim OfficialUpdater = new(1, 1);
 
@@ -69,7 +71,7 @@ internal static class WireGuardUpdates
         foreach (var raw in lines.Skip(2))
         {
             var line = raw.TrimEnd('\r');
-            if (line.Length <= 66 || line[64..66] != "  " || line.AsSpan(0, 64).ContainsAnyExcept("0123456789abcdefABCDEF"))
+            if (line.Length <= 66 || line[64..66] != "  " || line.AsSpan(0, 64).ContainsAnyExcept(HexDigits))
                 continue;
             var file = line[66..];
             if (!file.StartsWith(prefix, StringComparison.Ordinal) || !file.EndsWith(".msi", StringComparison.Ordinal)) continue;
@@ -109,7 +111,8 @@ internal static class WireGuardUpdates
 
     const int KilledByInstaller = unchecked((int)0xC000026B);
 
-    public static async Task RunOfficialUpdaterAsync()
+    /// <returns>true, wenn der Updater durch das WireGuard-MSI beendet wurde (Installation läuft ggf. noch).</returns>
+    public static async Task<bool> RunOfficialUpdaterAsync()
     {
         if (!await OfficialUpdater.WaitAsync(0).ConfigureAwait(false))
             throw new InvalidOperationException("Der WireGuard-Updater läuft bereits.");
@@ -125,7 +128,21 @@ internal static class WireGuardUpdates
             // Updater (KillWireGuardProcesses, Code STATUS_DLL_INIT_FAILED_LOGOFF). Ob das Update gelang, zeigt die Version.
             if (process.ExitCode is not (0 or KilledByInstaller))
                 throw new InvalidOperationException($"Der WireGuard-Updater endete mit Code {process.ExitCode}.");
+            return process.ExitCode == KilledByInstaller;
         }
         finally { OfficialUpdater.Release(); }
+    }
+
+    /// <summary>Wartet nach Beenden des Updaters durch das MSI darauf, dass die neue wireguard.exe geschrieben wurde.</summary>
+    public static async Task<Version?> WaitForOfficialVersionAsync(Version expected, TimeSpan timeout, CancellationToken token)
+    {
+        var sw = Stopwatch.StartNew();
+        while (true)
+        {
+            var installed = ReadVersion(WireGuardService.WireGuardExe);
+            if (installed is not null && !IsNewer(expected, installed)) return installed;
+            if (sw.Elapsed >= timeout) return installed;
+            await Task.Delay(500, token).ConfigureAwait(false);
+        }
     }
 }

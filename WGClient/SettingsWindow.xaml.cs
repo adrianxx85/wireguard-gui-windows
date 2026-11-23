@@ -123,9 +123,16 @@ public partial class SettingsWindow : Window
             }
 
             UpdateStatus.Text = "Der offizielle WireGuard-Updater läuft …";
-            await WireGuardUpdates.RunOfficialUpdaterAsync();
+            var killedByInstaller = await WireGuardUpdates.RunOfficialUpdaterAsync();
             if (_closed) return;
             var installed = RefreshInstalledVersion();
+            if (killedByInstaller && (installed is null || WireGuardUpdates.IsNewer(officialUpdate!, installed)))
+            {
+                UpdateStatus.Text = "WireGuard-Installation wird abgeschlossen …";
+                installed = await WireGuardUpdates.WaitForOfficialVersionAsync(officialUpdate!, TimeSpan.FromSeconds(60), _closing.Token);
+                if (_closed) return;
+                installed = RefreshInstalledVersion() ?? installed;
+            }
             if (installed is not null && !WireGuardUpdates.IsNewer(officialUpdate!, installed))
             {
                 _officialUpdate = null;
@@ -134,6 +141,7 @@ public partial class SettingsWindow : Window
             }
             else UpdateStatus.Text = "Die erwartete Version wurde noch nicht erkannt. Bitte prüfe das WireGuard-Protokoll und suche erneut nach Updates.";
         }
+        catch (OperationCanceledException) when (_closed) { }
         catch (Exception ex)
         {
             if (!_closed) UpdateStatus.Text = "Update konnte nicht gestartet oder abgeschlossen werden. " + ex.Message;

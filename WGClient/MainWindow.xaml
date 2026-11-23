@@ -61,7 +61,7 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="Noch keine Tunnel." Style="{StaticResource Muted}" Margin="6,4"
-                               Visibility="{Binding NoSelection, Converter={StaticResource BoolToVis}}"/>
+                               Visibility="{Binding HasNoTunnels, Converter={StaticResource BoolToVis}}"/>
                 </Grid>
             </DockPanel>
         </Border>

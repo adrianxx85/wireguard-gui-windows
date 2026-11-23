@@ -11,22 +11,23 @@ public sealed class TrayIcon : IDisposable
     static readonly Drawing.Color OffColor = Drawing.Color.FromArgb(110, 118, 134);
 
     readonly Forms.NotifyIcon _icon;
+    readonly Forms.ContextMenuStrip _menu;
     readonly Drawing.Icon _on = CreateIcon(OnColor);
     readonly Drawing.Icon _off = CreateIcon(OffColor);
 
     public TrayIcon(Action open, Action coffee, Action exit)
     {
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Öffnen", null, (_, _) => open());
-        menu.Items.Add("☕ Buy me a coffee", null, (_, _) => coffee());
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Beenden", null, (_, _) => exit());
+        _menu = new Forms.ContextMenuStrip();
+        _menu.Items.Add("Öffnen", null, (_, _) => open());
+        _menu.Items.Add("☕ Buy me a coffee", null, (_, _) => coffee());
+        _menu.Items.Add(new Forms.ToolStripSeparator());
+        _menu.Items.Add("Beenden", null, (_, _) => exit());
 
         _icon = new Forms.NotifyIcon
         {
             Icon = _off,
             Text = "WG Client – getrennt",
-            ContextMenuStrip = menu,
+            ContextMenuStrip = _menu,
             Visible = true,
         };
         _icon.DoubleClick += (_, _) => open();
@@ -45,6 +46,7 @@ public sealed class TrayIcon : IDisposable
     {
         _icon.Visible = false;
         _icon.Dispose();
+        _menu.Dispose();
         _on.Dispose();
         _off.Dispose();
     }
@@ -79,7 +81,11 @@ public sealed class TrayIcon : IDisposable
             g.FillRectangle(white, 9.5f, 14.5f, 13, 9.5f);
         }
         var h = bmp.GetHicon();
-        try { return (Drawing.Icon)Drawing.Icon.FromHandle(h).Clone(); }
+        try
+        {
+            using var icon = Drawing.Icon.FromHandle(h);
+            return (Drawing.Icon)icon.Clone();
+        }
         finally { DestroyIcon(h); }
     }
 

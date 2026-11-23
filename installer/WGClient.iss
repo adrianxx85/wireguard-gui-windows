@@ -40,8 +40,8 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; muss zum Mutex-Namen in App.xaml.cs passen – Setup erkennt so eine laufende App
-AppMutex=WGClientAppMutex
+; muss zum Mutex-Namen in App.xaml.cs passen – Setup erkennt sowohl 1.4.2+ (Global\) als auch ältere Instanzen
+AppMutex=Global\WGClientAppMutex,WGClientAppMutex
 ChangesAssociations=yes
 
 [Languages]
@@ -108,14 +108,36 @@ begin
   Result := ExpandConstant('{commonpf64}\WireGuard\wireguard.exe');
 end;
 
+function SetEnvironmentVariable(Name, Value: String): BOOL;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+function VerifyAuthenticode(const FilePath, ExpectedSigner: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := False;
+  if not FileExists(FilePath) then Exit;
+  SetEnvironmentVariable('WG_VERIFY_FILE', FilePath);
+  SetEnvironmentVariable('WG_VERIFY_SIGNER', ExpectedSigner);
+  try
+    Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$s = Get-AuthenticodeSignature -LiteralPath $env:WG_VERIFY_FILE; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate -and $s.SignerCertificate.GetNameInfo(''SimpleName'', $false) -eq $env:WG_VERIFY_SIGNER) { exit 0 } else { exit 1 }"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  finally
+    SetEnvironmentVariable('WG_VERIFY_FILE', '');
+    SetEnvironmentVariable('WG_VERIFY_SIGNER', '');
+  end;
+  if not Result then Log('Signaturprüfung fehlgeschlagen für ' + FilePath + ' (erwartet: ' + ExpectedSigner + ')');
+end;
+
 function ShouldInstallDotNet: Boolean;
 begin
-  Result := NeedDotNet;
+  Result := NeedDotNet and VerifyAuthenticode(ExpandConstant('{tmp}\dotnet-desktop-runtime.exe'), 'Microsoft Corporation');
 end;
 
 function ShouldInstallWireGuard: Boolean;
 begin
-  Result := NeedWireGuard;
+  Result := NeedWireGuard and VerifyAuthenticode(ExpandConstant('{tmp}\wireguard-installer.exe'), 'WireGuard LLC');
 end;
 
 function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
@@ -164,6 +186,16 @@ begin
   try
     try
       DownloadPage.Download;
+      if NeedDotNet and not VerifyAuthenticode(ExpandConstant('{tmp}\dotnet-desktop-runtime.exe'), 'Microsoft Corporation') then
+      begin
+        DeleteFile(ExpandConstant('{tmp}\dotnet-desktop-runtime.exe'));
+        RaiseException('Die digitale Signatur der .NET 10 Desktop Runtime ist ungültig.');
+      end;
+      if NeedWireGuard and not VerifyAuthenticode(ExpandConstant('{tmp}\wireguard-installer.exe'), 'WireGuard LLC') then
+      begin
+        DeleteFile(ExpandConstant('{tmp}\wireguard-installer.exe'));
+        RaiseException('Die digitale Signatur des WireGuard-Installers ist ungültig.');
+      end;
     except
       if DownloadPage.AbortedByUser then
         Result := False
@@ -330,6 +362,21 @@ begin
   end;
 end;
 
+function DeleteTunnelService(const Name: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  if not RegKeyExists(HKLM, ServiceKey(Name)) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  { 1060 = Dienst existiert nicht mehr, 1072 = bereits zum Löschen markiert }
+  Result := Exec(ExpandConstant('{sys}\sc.exe'), 'delete "WireGuardTunnel$' + Name + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and ((ResultCode = 0) or (ResultCode = 1060) or (ResultCode = 1072));
+  if not Result then Log('sc.exe delete fehlgeschlagen für ' + Name + ': ' + IntToStr(ResultCode));
+end;
+
 function StopAppTunnels: Boolean;
 var
   FindRec: TFindRec;
@@ -341,7 +388,7 @@ begin
     repeat
       Name := ChangeFileExt(FindRec.Name, '');
       if IsWireGuardAppTunnel(Name, ActiveDir + FindRec.Name) or IsEmbeddedTunnel(Name, ActiveDir + FindRec.Name) then
-        if not (StopTunnel(Name) and (not RegKeyExists(HKLM, ServiceKey(Name)) or Sc('delete', Name))) then
+        if not (StopTunnel(Name) and DeleteTunnelService(Name)) then
           Result := False;
     until not FindNext(FindRec);
   finally
@@ -365,19 +412,23 @@ end;
 procedure RestartSavedTunnels;
 var
   I: Integer;
+  Name: String;
 begin
   if RestartTunnels = nil then Exit;
   if RestartTunnels.Count = 0 then Exit;
   if not VerifyEmbeddedInstallation then
   begin
+    RestartTunnels.Clear;
     ReportTunnelUpdateFailure('Die Tunnel-Dienste konnten nicht neu gestartet werden. Der Programmordner ist unsicher oder unvollständig.');
     Exit;
   end;
   for I := RestartTunnels.Count - 1 downto 0 do
-    if StartTunnel(RestartTunnels[I]) then
-      RestartTunnels.Delete(I)
-    else
-      ReportTunnelUpdateFailure('Tunnel "' + RestartTunnels[I] + '" konnte nicht neu gestartet werden.');
+  begin
+    Name := RestartTunnels[I];
+    RestartTunnels.Delete(I);
+    if not StartTunnel(Name) then
+      ReportTunnelUpdateFailure('Tunnel "' + Name + '" konnte nicht neu gestartet werden.');
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -413,13 +464,14 @@ begin
         end;
         if EmbeddedTunnels.IndexOf(Name) < 0 then EmbeddedTunnels.Add(Name);
         State := TunnelState(Name);
-        if (State >= StartPending) and (State <> StopPending) and (RestartTunnels.IndexOf(Name) < 0) then RestartTunnels.Add(Name);
-        if (State = 0) or not StopTunnel(Name) then
+        if not StopTunnel(Name) then
         begin
           RestartSavedTunnels;
           Result := 'Tunnel "' + Name + '" konnte nicht gestoppt werden. Das Update wurde angehalten.';
           Exit;
         end;
+        if (State >= StartPending) and (State <> StopPending) and (RestartTunnels.IndexOf(Name) < 0) then
+          RestartTunnels.Add(Name);
       end;
     until not FindNext(FindRec);
   finally
@@ -442,7 +494,7 @@ begin
   { Die Standard-Edition kann eigene Tunnel-Dienste nicht ausführen: entfernen, neu verbinden über WireGuard }
   for I := 0 to EmbeddedTunnels.Count - 1 do
     if RegKeyExists(HKLM, ServiceKey(EmbeddedTunnels[I])) and
-      ((TunnelState(EmbeddedTunnels[I]) <> Stopped) or not Sc('delete', EmbeddedTunnels[I])) then
+      ((TunnelState(EmbeddedTunnels[I]) <> Stopped) or not DeleteTunnelService(EmbeddedTunnels[I])) then
       ReportTunnelUpdateFailure('Der alte Dienst für Tunnel "' + EmbeddedTunnels[I] + '" konnte nicht entfernt werden.');
 #endif
 end;

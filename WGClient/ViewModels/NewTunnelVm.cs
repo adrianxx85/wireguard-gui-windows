@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Windows.Media;
@@ -306,8 +307,8 @@ public sealed class NewTunnelVm : ObservableObject
         if (addresses.FirstOrDefault(a => !Cidr.IsValid(a)) is { } bad) return $"Ungültige Adresse: {bad}";
 
         var dns = ConfigBuilder.SplitList(Dns);
-        if (dns.FirstOrDefault(d => d.Contains('/') || d.Contains('=')) is { } badDns) return $"Ungültiger DNS-Eintrag: {badDns}";
-        if (IsInternet && !dns.Any(d => IPAddress.TryParse(d, out _)))
+        if (dns.FirstOrDefault(d => !Cidr.IsValidDnsEntry(d)) is { } badDns) return $"Ungültiger DNS-Eintrag: {badDns}";
+        if (IsInternet && !dns.Any(d => Cidr.TryParseIp(d, out _)))
             return "Für „gesamten Internetverkehr“ wird ein DNS-Server benötigt (z. B. 1.1.1.1) – sonst funktioniert die Namensauflösung nicht.";
 
         if (UseOwnKey && !WgValidation.IsKey(OwnPrivateKey))
@@ -345,7 +346,7 @@ public sealed class NewTunnelVm : ObservableObject
                 return "Dieses Gerät braucht eine Tunnel-Adresse derselben Adressfamilie wie die Gegenstelle (IPv4 oder IPv6).";
         }
 
-        if (Keepalive.Trim().Length > 0 && (!int.TryParse(Keepalive.Trim(), out var k) || k is < 0 or > 65535))
+        if (Keepalive.Trim().Length > 0 && (!int.TryParse(Keepalive.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var k) || k is < 0 or > 65535))
             return "Keepalive muss zwischen 0 und 65535 Sekunden liegen (leer = aus).";
         return null;
     }
@@ -410,7 +411,8 @@ public sealed class NewTunnelVm : ObservableObject
         if (PresharedKey.Trim().Length > 0) peer.Entries.Add(new WgEntry("PresharedKey", PresharedKey.Trim()));
         peer.Entries.Add(new WgEntry("AllowedIPs", string.Join(", ", AllowedIps())));
         peer.Entries.Add(new WgEntry("Endpoint", Endpoint.Trim()));
-        if (int.TryParse(Keepalive.Trim(), out var k) && k > 0) peer.Entries.Add(new WgEntry("PersistentKeepalive", k.ToString()));
+        if (int.TryParse(Keepalive.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var k) && k > 0)
+            peer.Entries.Add(new WgEntry("PersistentKeepalive", k.ToString(CultureInfo.InvariantCulture)));
 
         var cfg = new WgConfig();
         cfg.Sections.Add(iface);

@@ -112,32 +112,56 @@ public sealed partial class TunnelStore
         writer.Write(text);
     }
 
+    static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
     public static void QueueImport(string path)
     {
         new TunnelStore().EnsureCreated();
-        WriteProtectedFile(PendingImportPath, Path.GetFullPath(path));
+        var pending = Path.Combine(Root, $"pending-import-{Guid.NewGuid():N}.txt");
+        WriteProtectedFile(pending, Path.GetFullPath(path));
     }
 
-    public static string? TakePendingImport()
+    public static List<string> TakePendingImports()
     {
-        var path = CheckedFile(PendingImportPath);
-        if (!File.Exists(path)) return null;
-        var pending = File.ReadAllText(path).Trim();
-        File.Delete(path);
-        return pending;
+        var result = new List<string>();
+        if (!Directory.Exists(Root)) return result;
+
+        var files = new List<string>();
+        if (File.Exists(PendingImportPath)) files.Add(PendingImportPath);
+        files.AddRange(Directory.EnumerateFiles(Root, "pending-import-*.txt")
+            .OrderBy(File.GetCreationTimeUtc));
+
+        foreach (var file in files)
+        {
+            var checkedPath = CheckedFile(file, out var exists);
+            if (!exists) continue;
+            var pending = File.ReadAllText(checkedPath).Trim();
+            File.Delete(checkedPath);
+            if (pending.Length > 0) result.Add(pending);
+        }
+        return result;
     }
 
     [GeneratedRegex("[^a-zA-Z0-9_=+.-]")]
     private static partial Regex InvalidNameChars();
 
-    /// <summary>WireGuard erlaubt als Tunnelname nur [a-zA-Z0-9_=+.-], max. 32 Zeichen.</summary>
+    /// <summary>WireGuard erlaubt als Tunnelname nur [a-zA-Z0-9_=+.-], max. 32 Zeichen, keine Windows-Gerätenamen.</summary>
     public static string SanitizeName(string name)
     {
         var n = name.Trim()
             .Replace("ä", "ae").Replace("ö", "oe").Replace("ü", "ue")
             .Replace("Ä", "Ae").Replace("Ö", "Oe").Replace("Ü", "Ue").Replace("ß", "ss");
-        n = InvalidNameChars().Replace(n, "_");
-        if (n.Length > 32) n = n[..32];
+        n = InvalidNameChars().Replace(n, "_").Trim('.');
+        if (n.Length == 0) return "tunnel";
+        var dot = n.IndexOf('.');
+        var stem = dot >= 0 ? n[..dot] : n;
+        if (ReservedDeviceNames.Contains(stem)) n = "_" + n;
+        if (n.Length > 32) n = n[..32].TrimEnd('.');
         return n.Length == 0 ? "tunnel" : n;
     }
 
@@ -180,6 +204,10 @@ public sealed partial class TunnelStore
             File.Move(staged, path, overwrite: true);
         }
         finally { File.Delete(staged); }
+
+        // Veraltete Klartext-Dateien (vor 1.3.1) nach erfolgreicher Migration/Aktualisierung entfernen.
+        foreach (var legacy in new[] { Path.Combine(TunnelsDir, name + ".conf"), Path.Combine(TunnelsDir, name + ".json") })
+            File.Delete(CheckedFile(legacy));
     }
 
     public static string ActivePath(string name) => Path.Combine(ActiveDir, name + ".conf");

@@ -7,9 +7,10 @@ namespace WGClient;
 
 public partial class App : Application
 {
-    // Name muss mit AppMutex im Installer (installer\WGClient.iss) übereinstimmen
-    const string MutexName = "WGClientAppMutex";
-    const string ShowEventName = "WGClientShowWindow";
+    // Name muss mit AppMutex im Installer (installer\WGClient.iss) übereinstimmen.
+    // Global\ verhindert Mutex-/Event-Squatting durch unprivilegierte Prozesse in derselben Session.
+    const string MutexName = @"Global\WGClientAppMutex";
+    const string ShowEventName = @"Global\WGClientShowWindow";
 
     public const string CoffeeUrl = "https://paypal.me/AdrianZblewski";
     public static string VersionLabel { get; } = "Version " +
@@ -52,34 +53,54 @@ public partial class App : Application
             return;
         }
 
+        _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
 
-        _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+        var activationEvent = _showEvent;
         var listener = new Thread(() =>
         {
-            while (_showEvent.WaitOne())
-                Dispatcher.BeginInvoke(window.OnExternalActivation);
+            try
+            {
+                while (activationEvent.WaitOne())
+                    Dispatcher.BeginInvoke(window.OnExternalActivation);
+            }
+            catch (ObjectDisposedException) { /* reguläres Beenden */ }
         }) { IsBackground = true, Name = "SingleInstanceListener" };
         listener.Start();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _showEvent?.Dispose();
+        _showEvent = null;
         _mutex?.Dispose();
+        _mutex = null;
         base.OnExit(e);
     }
 
     public static string? FindConfArg(IEnumerable<string> args) =>
         args.FirstOrDefault(a => a.EndsWith(".conf", StringComparison.OrdinalIgnoreCase) && File.Exists(a));
 
-    public static void OpenUrl(string url) =>
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    /// <summary>Öffnet eine HTTPS-URL über explorer.exe, damit der Browser nicht mit Administratorrechten startet.</summary>
+    public static void OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            throw new ArgumentException("Es werden nur HTTPS-Links geöffnet.", nameof(url));
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        var psi = new ProcessStartInfo(explorer) { UseShellExecute = false };
+        psi.ArgumentList.Add(uri.AbsoluteUri);
+        Process.Start(psi);
+    }
 
-    static void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
+    void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         MessageBox.Show(e.Exception.Message, "WG Client – Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
-        e.Handled = true;
+        if (MainWindow is { IsLoaded: true })
+            e.Handled = true;
+        else
+            Shutdown(1);
     }
 }

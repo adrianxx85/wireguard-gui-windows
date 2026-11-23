@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace WGClient.Core;
@@ -84,6 +86,10 @@ public static class EmbeddedTunnel
     const ushort AfInet = 2, AfInet6 = 23;
     const int ErrorMoreData = 234;
 
+    const int MaxConfigAttempts = 8;
+    const uint MaxConfigBytes = 16 * 1024 * 1024;
+    static readonly ulong MaxFileTime = (ulong)DateTime.MaxValue.ToFileTimeUtc();
+
     public static TunnelStats? GetStats(string tunnel)
     {
         var adapter = WireGuardOpenAdapter(tunnel);
@@ -91,15 +97,19 @@ public static class EmbeddedTunnel
         try
         {
             uint size = 4096;
-            byte[] buffer;
-            while (true)
+            for (var attempt = 0; attempt < MaxConfigAttempts; attempt++)
             {
-                buffer = new byte[size];
-                if (WireGuardGetConfiguration(adapter, buffer, ref size)) break;
-                if (Marshal.GetLastPInvokeError() != ErrorMoreData) return null;
+                if (size is 0 or > MaxConfigBytes) return null;
+                var buffer = new byte[size];
+                try
+                {
+                    if (WireGuardGetConfiguration(adapter, buffer, ref size))
+                        return ParseStats(buffer.AsSpan(0, (int)Math.Min(size, (uint)buffer.Length)));
+                    if (Marshal.GetLastPInvokeError() != ErrorMoreData) return null;
+                }
+                finally { CryptographicOperations.ZeroMemory(buffer); } // enthält den privaten Schlüssel
             }
-            try { return ParseStats(buffer.AsSpan(0, (int)Math.Min(size, (uint)buffer.Length))); }
-            finally { Array.Clear(buffer); } // enthält den privaten Schlüssel
+            return null;
         }
         finally { WireGuardCloseAdapter(adapter); }
     }
@@ -111,19 +121,21 @@ public static class EmbeddedTunnel
         long rx = 0, tx = 0;
         ulong handshake = 0;
         string? endpoint = null;
-        var offset = InterfaceSize;
+        long offset = InterfaceSize;
         for (uint i = 0; i < peers; i++)
         {
-            if (offset + PeerSize > data.Length) return null;
-            var peer = data.Slice(offset, PeerSize);
+            if (offset < 0 || offset > data.Length - PeerSize) return null;
+            var peer = data.Slice((int)offset, PeerSize);
             if (endpoint is null && (BinaryPrimitives.ReadUInt32LittleEndian(peer[PeerFlags..]) & PeerHasEndpoint) != 0)
                 endpoint = ReadEndpoint(peer.Slice(PeerEndpoint, 28));
             tx += (long)BinaryPrimitives.ReadUInt64LittleEndian(peer[PeerTx..]);
             rx += (long)BinaryPrimitives.ReadUInt64LittleEndian(peer[PeerRx..]);
             handshake = Math.Max(handshake, BinaryPrimitives.ReadUInt64LittleEndian(peer[PeerHandshake..]));
-            offset += PeerSize + (int)BinaryPrimitives.ReadUInt32LittleEndian(peer[PeerAllowedCount..]) * AllowedIpSize;
+            offset += PeerSize + (long)BinaryPrimitives.ReadUInt32LittleEndian(peer[PeerAllowedCount..]) * AllowedIpSize;
         }
-        return new TunnelStats(handshake > 0 ? DateTimeOffset.FromFileTime((long)handshake) : null, rx, tx, endpoint);
+        DateTimeOffset? lastHandshake = handshake > 0 && handshake <= MaxFileTime
+            ? DateTimeOffset.FromFileTime((long)handshake) : null;
+        return new TunnelStats(lastHandshake, rx, tx, endpoint);
     }
 
     // SOCKADDR_INET: Familie (2), Port (2, Netzwerk-Byte-Reihenfolge), IPv4 ab 4 bzw. IPv6 ab 8.
@@ -171,13 +183,14 @@ public static class EmbeddedTunnel
             var start = LogHeader + (int)((next + i) % LogMaxLines) * LogLineBytes;
             if (start + LogLineBytes > data.Length) continue;
             var ns = BinaryPrimitives.ReadInt64LittleEndian(data[start..]);
-            if (ns == 0) continue;
+            var ticks = ns / 100;
+            if (ns <= 0 || ticks > DateTime.MaxValue.Ticks - DateTime.UnixEpoch.Ticks) continue;
             var text = data.Slice(start + 8, LogLineText);
             var end = text.IndexOf((byte)0);
             if (end <= 0) continue;
-            // Gleiches Format wie "wireguard.exe /dumplog", damit sich beide Logs nach Zeit mischen lassen.
-            var time = DateTime.UnixEpoch.AddTicks(ns / 100).ToLocalTime();
-            lines.Add($"{time:yyyy-MM-dd HH:mm:ss.ffffff}: {Encoding.UTF8.GetString(text[..end])}");
+            // Gleiches Format wie "wireguard.exe /dumplog" (invariant, damit sich beide Logs nach Zeit mischen lassen).
+            var time = DateTime.UnixEpoch.AddTicks(ticks).ToLocalTime();
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"{time:yyyy-MM-dd HH:mm:ss.ffffff}: {Encoding.UTF8.GetString(text[..end])}"));
         }
         return lines;
     }

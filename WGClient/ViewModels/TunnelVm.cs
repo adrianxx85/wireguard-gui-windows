@@ -216,8 +216,8 @@ public sealed class TunnelVm : ObservableObject
         IncludeIPv6 = o.IncludeIPv6;
         SplitAllowedIps = o.SplitAllowedIps;
         Endpoint = o.Endpoint;
-        MtuText = o.Mtu?.ToString() ?? "";
-        KeepaliveText = o.PersistentKeepalive?.ToString() ?? "";
+        MtuText = o.Mtu?.ToString(CultureInfo.InvariantCulture) ?? "";
+        KeepaliveText = o.PersistentKeepalive?.ToString(CultureInfo.InvariantCulture) ?? "";
         Autostart = o.Autostart;
         _loading = false;
         IsDirty = false;
@@ -229,15 +229,21 @@ public sealed class TunnelVm : ObservableObject
         options = new TunnelOptions();
         error = null;
 
+        var dnsEntries = ConfigBuilder.SplitList(Dns);
+        if (dnsEntries.FirstOrDefault(d => !Cidr.IsValidDnsEntry(d)) is { } badDns)
+        { error = $"Ungültiger DNS-Eintrag: {badDns}"; return false; }
+
         int? mtu = null, keepalive = null;
         if (!string.IsNullOrWhiteSpace(MtuText))
         {
-            if (!int.TryParse(MtuText.Trim(), out var m) || m is < 576 or > 9000) { error = "MTU muss zwischen 576 und 9000 liegen."; return false; }
+            if (!int.TryParse(MtuText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var m) || m is < 576 or > 9000)
+            { error = "MTU muss zwischen 576 und 9000 liegen."; return false; }
             mtu = m;
         }
         if (!string.IsNullOrWhiteSpace(KeepaliveText))
         {
-            if (!int.TryParse(KeepaliveText.Trim(), out var k) || k is < 0 or > 65535) { error = "Keepalive muss zwischen 0 und 65535 Sekunden liegen."; return false; }
+            if (!int.TryParse(KeepaliveText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var k) || k is < 0 or > 65535)
+            { error = "Keepalive muss zwischen 0 und 65535 Sekunden liegen."; return false; }
             keepalive = k;
         }
 
@@ -267,7 +273,7 @@ public sealed class TunnelVm : ObservableObject
 
         options = new TunnelOptions
         {
-            Dns = string.Join(", ", ConfigBuilder.SplitList(Dns)),
+            Dns = string.Join(", ", dnsEntries),
             Mode = mode,
             KillSwitch = KillSwitch,
             AllowLan = AllowLan,

@@ -55,7 +55,7 @@ public partial class NewTunnelWindow : Window
             DialogResult = true;
             return;
         }
-        if (_vm.IsStep1 && _vm.Name.Length == 0)
+        if (_vm.IsStep1 && _vm.Name.Trim().Length == 0)
             _ = Dispatcher.BeginInvoke(() => NameBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 

@@ -38,19 +38,25 @@ public partial class MainWindow : Window
         UpdateTray();
         _timer.Start();
 
-        // .conf als Startargument (z. B. "Öffnen mit")
+        // .conf als Startargument (z. B. "Öffnen mit") sowie ggf. während des Starts eingereihte Imports
         var arg = App.FindConfArg(Environment.GetCommandLineArgs().Skip(1));
         if (arg is not null) ImportFile(arg);
+        ImportPendingFiles();
     }
 
     /// <summary>Eine zweite Instanz wurde gestartet: Fenster zeigen und ggf. übergebene .conf importieren.</summary>
     public void OnExternalActivation()
     {
         ShowFromTray();
+        ImportPendingFiles();
+    }
+
+    void ImportPendingFiles()
+    {
         try
         {
-            var path = Core.TunnelStore.TakePendingImport();
-            if (path is not null && File.Exists(path)) ImportFile(path);
+            foreach (var path in Core.TunnelStore.TakePendingImports())
+                if (File.Exists(path)) ImportFile(path);
         }
         catch (Exception ex) { _vm.StatusMessage = "Übergebene Datei konnte nicht importiert werden: " + ex.Message; }
     }
@@ -161,19 +167,24 @@ public partial class MainWindow : Window
     async void Toggle_Click(object sender, RoutedEventArgs e)
     {
         if (_vm.Selected is not { } t) return;
-        if (t.IsDirty && !t.IsActive)
+        var disconnect = t.IsActive;
+        if (!disconnect && t.IsDirty)
         {
             var r = MessageBox.Show(this, "Es gibt ungespeicherte Optionen. Vor dem Verbinden speichern?",
                 "Verbinden", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             if (r == MessageBoxResult.Cancel) return;
             if (r == MessageBoxResult.Yes)
             {
-                try { await _vm.SaveAsync(t); }
+                try { await _vm.SaveAsync(t, reconnectIfActive: false); }
                 catch (Exception ex) { ShowError("Speichern fehlgeschlagen", ex); return; }
             }
         }
-        try { await _vm.ToggleAsync(t); }
-        catch (Exception ex) { ShowError(t.IsActive ? "Trennen fehlgeschlagen" : "Verbinden fehlgeschlagen", ex); }
+        try
+        {
+            if (disconnect) await _vm.DisconnectAsync(t);
+            else await _vm.ConnectAsync(t);
+        }
+        catch (Exception ex) { ShowError(disconnect ? "Trennen fehlgeschlagen" : "Verbinden fehlgeschlagen", ex); }
     }
 
     async void Save_Click(object sender, RoutedEventArgs e)

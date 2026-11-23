@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 
@@ -26,7 +27,7 @@ public static class ConfigBuilder
         var iface = cfg.Interface ?? throw new InvalidOperationException("Sektion [Interface] fehlt.");
 
         iface.Set("DNS", string.Join(", ", SplitList(o.Dns)));
-        iface.Set("MTU", o.Mtu?.ToString());
+        iface.Set("MTU", o.Mtu?.ToString(CultureInfo.InvariantCulture));
 
         if (cfg.Peers.FirstOrDefault() is { } first)
         {
@@ -37,8 +38,8 @@ public static class ConfigBuilder
                 AddDnsRoutes(routes, cfg.Peers.Skip(1), o.Dns);
             if (!routes.SequenceEqual(imported, StringComparer.OrdinalIgnoreCase))
                 first.Set("AllowedIPs", string.Join(", ", routes));
-            if (!string.IsNullOrWhiteSpace(o.Endpoint)) first.Set("Endpoint", o.Endpoint.Trim());
-            first.Set("PersistentKeepalive", o.PersistentKeepalive is > 0 ? o.PersistentKeepalive.ToString() : null);
+            first.Set("Endpoint", string.IsNullOrWhiteSpace(o.Endpoint) ? null : o.Endpoint.Trim());
+            first.Set("PersistentKeepalive", o.PersistentKeepalive is > 0 ? o.PersistentKeepalive.Value.ToString(CultureInfo.InvariantCulture) : null);
         }
 
         return cfg;
@@ -60,7 +61,8 @@ public static class ConfigBuilder
         {
             result.AddRange(Cidr.SubtractV4("0.0.0.0/0", Cidr.LocalV4Ranges));
             result.AddRange(SplitList(o.LanExceptions));
-            if (o.IncludeIPv6) result.AddRange(["::/1", "8000::/1"]);
+            // Nur Global Unicast (2000::/3), damit Link-Local (fe80::/10), ULA (fc00::/7) und Multicast (ff00::/8) im LAN bleiben.
+            if (o.IncludeIPv6) result.Add("2000::/3");
         }
         else if (o.KillSwitch)
         {

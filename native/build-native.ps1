@@ -59,6 +59,12 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $checkout '.git'))) {
         git -c advice.detachedHead=false clone -q --depth 1 --branch $Tag $Repo $checkout
         if ($LASTEXITCODE -ne 0) { throw 'git clone fehlgeschlagen.' }
+    } else {
+        git -C $checkout cat-file -e "$Commit^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            git -C $checkout fetch -q --depth 1 origin "refs/tags/${Tag}:refs/tags/${Tag}"
+            if ($LASTEXITCODE -ne 0) { throw "git fetch fuer Tag $Tag fehlgeschlagen." }
+        }
     }
     $sourceZip = Join-Path $work 'source.zip'
     git -C $checkout archive --format=zip "--output=$sourceZip" $Commit

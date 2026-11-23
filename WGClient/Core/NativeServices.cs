@@ -46,7 +46,7 @@ internal static class NativeServices
 
     internal sealed class ServiceHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        private ServiceHandle() : base(ownsHandle: true) { }
+        internal ServiceHandle() : base(ownsHandle: true) { }
 
         public Status QueryStatus()
         {

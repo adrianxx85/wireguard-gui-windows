@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 
@@ -14,22 +15,49 @@ public static class Cidr
         "224.0.0.0/4", "255.255.255.255/32"                                 // Multicast/Broadcast (Discovery, mDNS …)
     ];
 
+    /// <summary>Strikte IP-Prüfung ohne verkürzte IPv4-Formen (z. B. "10", "192.168.1") und ohne IPv6-Scope-ID (%).</summary>
+    public static bool TryParseIp(string text, out IPAddress ip)
+    {
+        ip = IPAddress.None;
+        if (string.IsNullOrEmpty(text) || text.Contains('%') || text.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)))
+            return false;
+        if (!IPAddress.TryParse(text, out var parsed)) return false;
+        if (parsed.AddressFamily == AddressFamily.InterNetwork && !string.Equals(parsed.ToString(), text, StringComparison.Ordinal))
+            return false;
+        ip = parsed;
+        return true;
+    }
+
+    /// <summary>Prüft einen DNS-Eintrag (IPv4/IPv6-Server oder Suchdomäne).</summary>
+    public static bool IsValidDnsEntry(string entry)
+    {
+        var token = entry.Trim();
+        if (token.Length == 0 || token.Contains('/') || token.Contains('=') || token.Contains('#') ||
+            token.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)))
+            return false;
+        if (token.Contains(':'))
+            return TryParseIp(token, out var v6) && v6.AddressFamily == AddressFamily.InterNetworkV6;
+        if (IPAddress.TryParse(token, out _))
+            return TryParseIp(token, out var v4) && v4.AddressFamily == AddressFamily.InterNetwork;
+        return Uri.CheckHostName(token) == UriHostNameType.Dns;
+    }
+
     public static bool IsValid(string cidr)
     {
         var parts = cidr.Trim().Split('/');
-        if (parts.Length > 2 || !IPAddress.TryParse(parts[0], out var ip)) return false;
+        if (parts.Length > 2 || !TryParseIp(parts[0], out var ip)) return false;
         if (parts.Length == 1) return true;
         var max = ip.AddressFamily == AddressFamily.InterNetwork ? 32 : 128;
-        return int.TryParse(parts[1], out var p) && p >= 0 && p <= max;
+        return int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p >= 0 && p <= max;
     }
 
     public static bool TryParseV4(string cidr, out uint start, out uint end)
     {
         start = end = 0;
         var parts = cidr.Trim().Split('/');
-        if (!IPAddress.TryParse(parts[0], out var ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
+        if (parts.Length > 2 || !TryParseIp(parts[0], out var ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
         var prefix = 32;
-        if (parts.Length > 1 && (!int.TryParse(parts[1], out prefix) || prefix is < 0 or > 32)) return false;
+        if (parts.Length == 2 && (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out prefix) || prefix is < 0 or > 32)) return false;
         var mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
         start = ToUInt(ip) & mask;
         end = start | ~mask;
@@ -78,6 +106,7 @@ public static class Cidr
 
     public static bool ContainsV4(IEnumerable<string> cidrs, IPAddress ip)
     {
+        if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
         var a = ToUInt(ip);
         return cidrs.Any(c => TryParseV4(c, out var s, out var e) && a >= s && a <= e);
     }
