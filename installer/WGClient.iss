@@ -40,8 +40,9 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; muss zum Mutex-Namen in App.xaml.cs passen – Setup erkennt sowohl 1.4.2+ (Global\) als auch ältere Instanzen
-AppMutex=Global\WGClientAppMutex,WGClientAppMutex
+; muss zu App.xaml.cs passen: WGClientAppMutex = Instanz in dieser Sitzung, Global\WGClientAppRunning = Instanz
+; in irgendeiner Sitzung (ab 1.4.3), Global\WGClientAppMutex = laufende 1.4.2
+AppMutex=WGClientAppMutex,Global\WGClientAppRunning,Global\WGClientAppMutex
 ChangesAssociations=yes
 
 [Languages]
@@ -121,7 +122,7 @@ begin
   SetEnvironmentVariable('WG_VERIFY_SIGNER', ExpectedSigner);
   try
     Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$s = Get-AuthenticodeSignature -LiteralPath $env:WG_VERIFY_FILE; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate -and $s.SignerCertificate.GetNameInfo(''SimpleName'', $false) -eq $env:WG_VERIFY_SIGNER) { exit 0 } else { exit 1 }"',
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$s = Get-AuthenticodeSignature -LiteralPath $env:WG_VERIFY_FILE; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate -and (($s.SignerCertificate.Subject -split '',\s*'') -ccontains (''O='' + $env:WG_VERIFY_SIGNER))) { exit 0 } else { exit 1 }"',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
   finally
     SetEnvironmentVariable('WG_VERIFY_FILE', '');
@@ -464,14 +465,16 @@ begin
         end;
         if EmbeddedTunnels.IndexOf(Name) < 0 then EmbeddedTunnels.Add(Name);
         State := TunnelState(Name);
+        { Vor dem Stoppen merken: Läuft das Stoppen in den Timeout, muss der Tunnel beim Abbruch trotzdem
+          wieder starten (StartTunnel wartet ein noch laufendes StopPending ab). }
+        if (State >= StartPending) and (State <> StopPending) and (RestartTunnels.IndexOf(Name) < 0) then
+          RestartTunnels.Add(Name);
         if not StopTunnel(Name) then
         begin
           RestartSavedTunnels;
           Result := 'Tunnel "' + Name + '" konnte nicht gestoppt werden. Das Update wurde angehalten.';
           Exit;
         end;
-        if (State >= StartPending) and (State <> StopPending) and (RestartTunnels.IndexOf(Name) < 0) then
-          RestartTunnels.Add(Name);
       end;
     until not FindNext(FindRec);
   finally

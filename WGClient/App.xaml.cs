@@ -7,10 +7,13 @@ namespace WGClient;
 
 public partial class App : Application
 {
-    // Name muss mit AppMutex im Installer (installer\WGClient.iss) übereinstimmen.
-    // Global\ verhindert Mutex-/Event-Squatting durch unprivilegierte Prozesse in derselben Session.
-    const string MutexName = @"Global\WGClientAppMutex";
-    const string ShowEventName = @"Global\WGClientShowWindow";
+    // Single-Instance pro Benutzersitzung: Mutex und Event liegen im sitzungslokalen Namespace, damit
+    // mehrere angemeldete Benutzer (Schnelle Benutzerumschaltung, RDP) je eine eigene Instanz nutzen können.
+    // Hinweis: Weder Local\ noch Global\ schützt vor Namens-Squatting – Mutexe/Events darf jeder Prozess anlegen.
+    const string MutexName = @"Local\WGClientAppMutex";
+    const string ShowEventName = @"Local\WGClientShowWindow";
+    // Nur für den Installer (AppMutex in installer\WGClient.iss): erkennt laufende Instanzen in allen Sitzungen.
+    const string PresenceMutexName = @"Global\WGClientAppRunning";
 
     public const string CoffeeUrl = "https://paypal.me/AdrianZblewski";
     public static string VersionLabel { get; } = "Version " +
@@ -18,11 +21,21 @@ public partial class App : Application
             ?? typeof(App).Assembly.GetName().Version?.ToString() ?? "unbekannt");
 
     Mutex? _mutex;
+    Mutex? _presenceMutex;
     EventWaitHandle? _showEvent;
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        _mutex = new Mutex(true, MutexName, out var isFirst);
+        bool isFirst;
+        try { _mutex = new Mutex(true, MutexName, out isFirst); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+        {
+            // Ein fremder Prozess hält den Namen mit restriktiven Rechten.
+            MessageBox.Show("WG Client kann nicht gestartet werden, weil ein anderer Prozess die Start-Sperre blockiert. " +
+                "Bitte abmelden und erneut anmelden.", "WG Client", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
         if (!isFirst)
         {
             // Läuft schon: ggf. .conf an die laufende Instanz übergeben, Fenster nach vorne holen, beenden
@@ -53,13 +66,17 @@ public partial class App : Application
             return;
         }
 
-        _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+        try { _presenceMutex = new Mutex(false, PresenceMutexName); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException) { /* nur Installer-Hinweis */ }
+
+        try { _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException) { _showEvent = null; }
 
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
 
-        var activationEvent = _showEvent;
+        if (_showEvent is not { } activationEvent) return; // ohne Event: keine Aktivierung durch eine zweite Instanz
         var listener = new Thread(() =>
         {
             try
@@ -76,6 +93,8 @@ public partial class App : Application
     {
         _showEvent?.Dispose();
         _showEvent = null;
+        _presenceMutex?.Dispose();
+        _presenceMutex = null;
         _mutex?.Dispose();
         _mutex = null;
         base.OnExit(e);
@@ -98,9 +117,8 @@ public partial class App : Application
     void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         MessageBox.Show(e.Exception.Message, "WG Client – Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
-        if (MainWindow is { IsLoaded: true })
-            e.Handled = true;
-        else
+        e.Handled = true;
+        if (MainWindow is not { IsLoaded: true })
             Shutdown(1);
     }
 }

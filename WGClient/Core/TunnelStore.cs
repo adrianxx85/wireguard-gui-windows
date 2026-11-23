@@ -119,30 +119,58 @@ public sealed partial class TunnelStore
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
 
+    // Pro Benutzersitzung eine eigene Warteschlange – jede Sitzung hat ihre eigene App-Instanz.
+    static readonly string PendingPrefix =
+        $"pending-import-{System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture)}-";
+
+    [GeneratedRegex("^pending-import-[0-9a-f]{32}\\.txt$")]
+    private static partial Regex LegacyPendingName(); // 1.4.2: ohne Sitzungs-ID
+
     public static void QueueImport(string path)
     {
         new TunnelStore().EnsureCreated();
-        var pending = Path.Combine(Root, $"pending-import-{Guid.NewGuid():N}.txt");
-        WriteProtectedFile(pending, Path.GetFullPath(path));
+        var id = $"{PendingPrefix}{Guid.NewGuid():N}";
+        var staged = Path.Combine(Root, id + ".tmp");
+        try
+        {
+            // Erst vollständig schreiben, dann umbenennen: die laufende Instanz sieht nie eine halb geschriebene Datei.
+            WriteProtectedFile(staged, Path.GetFullPath(path));
+            File.Move(staged, Path.Combine(Root, id + ".txt"));
+        }
+        finally { File.Delete(staged); }
     }
 
-    public static List<string> TakePendingImports()
+    /// <summary>
+    /// Liefert die eingereihten Importe dieser Sitzung. Jede Datei wird einzeln verarbeitet: Schlägt Lesen oder
+    /// Löschen fehl, bleibt sie für einen späteren Versuch liegen und die übrigen werden trotzdem geliefert.
+    /// </summary>
+    public static List<string> TakePendingImports(out string? error)
     {
         var result = new List<string>();
+        error = null;
         if (!Directory.Exists(Root)) return result;
 
         var files = new List<string>();
         if (File.Exists(PendingImportPath)) files.Add(PendingImportPath);
         files.AddRange(Directory.EnumerateFiles(Root, "pending-import-*.txt")
+            .Where(f => Path.GetFileName(f) is var n &&
+                (n.StartsWith(PendingPrefix, StringComparison.OrdinalIgnoreCase) || LegacyPendingName().IsMatch(n)))
             .OrderBy(File.GetCreationTimeUtc));
 
         foreach (var file in files)
         {
-            var checkedPath = CheckedFile(file, out var exists);
-            if (!exists) continue;
-            var pending = File.ReadAllText(checkedPath).Trim();
-            File.Delete(checkedPath);
-            if (pending.Length > 0) result.Add(pending);
+            try
+            {
+                var checkedPath = CheckedFile(file, out var exists);
+                if (!exists) continue;
+                var pending = File.ReadAllText(checkedPath).Trim();
+                File.Delete(checkedPath);
+                if (pending.Length > 0) result.Add(pending);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                error = ex.Message;
+            }
         }
         return result;
     }

@@ -37,9 +37,12 @@ public static class Cidr
             return false;
         if (token.Contains(':'))
             return TryParseIp(token, out var v6) && v6.AddressFamily == AddressFamily.InterNetworkV6;
-        if (IPAddress.TryParse(token, out _))
-            return TryParseIp(token, out var v4) && v4.AddressFamily == AddressFamily.InterNetwork;
-        return Uri.CheckHostName(token) == UriHostNameType.Dns;
+        if (TryParseIp(token, out var v4)) return v4.AddressFamily == AddressFamily.InterNetwork;
+        // Rein numerische Einträge, die keine exakte IPv4-Adresse sind (z. B. "192.168.1"), sind fast immer Tippfehler.
+        if (token.All(c => char.IsAsciiDigit(c) || c == '.')) return false;
+        // Suchdomäne: WireGuard übernimmt sie unverändert, daher großzügig (auch "_msdcs.corp", IDN, abschließender Punkt).
+        return token.TrimEnd('.').Split('.').All(label =>
+            label.Length is > 0 and <= 63 && label.All(c => char.IsLetterOrDigit(c) || c is '-' or '_'));
     }
 
     public static bool IsValid(string cidr)

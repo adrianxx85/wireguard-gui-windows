@@ -60,8 +60,13 @@ try {
         git -c advice.detachedHead=false clone -q --depth 1 --branch $Tag $Repo $checkout
         if ($LASTEXITCODE -ne 0) { throw 'git clone fehlgeschlagen.' }
     } else {
-        git -C $checkout cat-file -e "$Commit^{commit}" 2>$null
-        if ($LASTEXITCODE -ne 0) {
+        # Windows PowerShell 5.1 macht aus stderr nativer Befehle bei 'Stop' einen Abbruch – hier lokal 'Continue'.
+        $hasCommit = & {
+            $ErrorActionPreference = 'Continue'
+            git -C $checkout cat-file -e "$Commit^{commit}" 2>$null
+            $LASTEXITCODE -eq 0
+        }
+        if (-not $hasCommit) {
             git -C $checkout fetch -q --depth 1 origin "refs/tags/${Tag}:refs/tags/${Tag}"
             if ($LASTEXITCODE -ne 0) { throw "git fetch fuer Tag $Tag fehlgeschlagen." }
         }

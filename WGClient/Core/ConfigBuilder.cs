@@ -38,7 +38,9 @@ public static class ConfigBuilder
                 AddDnsRoutes(routes, cfg.Peers.Skip(1), o.Dns);
             if (!routes.SequenceEqual(imported, StringComparer.OrdinalIgnoreCase))
                 first.Set("AllowedIPs", string.Join(", ", routes));
-            first.Set("Endpoint", string.IsNullOrWhiteSpace(o.Endpoint) ? null : o.Endpoint.Trim());
+            if (!string.IsNullOrWhiteSpace(o.Endpoint)) first.Set("Endpoint", o.Endpoint.Trim());
+            else if (o.EndpointExplicit == true) first.Set("Endpoint", null);
+            // sonst: altes Profil, leer = importierten Endpoint behalten
             first.Set("PersistentKeepalive", o.PersistentKeepalive is > 0 ? o.PersistentKeepalive.Value.ToString(CultureInfo.InvariantCulture) : null);
         }
 
@@ -61,8 +63,8 @@ public static class ConfigBuilder
         {
             result.AddRange(Cidr.SubtractV4("0.0.0.0/0", Cidr.LocalV4Ranges));
             result.AddRange(SplitList(o.LanExceptions));
-            // Nur Global Unicast (2000::/3), damit Link-Local (fe80::/10), ULA (fc00::/7) und Multicast (ff00::/8) im LAN bleiben.
-            if (o.IncludeIPv6) result.Add("2000::/3");
+            // Gesamter IPv6-Bereich (inkl. NAT64 64:ff9b::/96) außer Link-Local (fe80::/10), ULA (fc00::/7) und Multicast (ff00::/8).
+            if (o.IncludeIPv6) result.AddRange(AllowLanV6Routes);
         }
         else if (o.KillSwitch)
         {
@@ -78,12 +80,17 @@ public static class ConfigBuilder
         return result.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>::/0 ohne fc00::/7, fe80::/10 und ff00::/8 (enthält keine /0-Route, daher kein Kill-Switch).</summary>
+    public static readonly string[] AllowLanV6Routes =
+        ["::/1", "8000::/2", "c000::/3", "e000::/4", "f000::/5", "f800::/6", "fe00::/9", "fec0::/10"];
+
     static void AddDnsRoutes(List<string> routes, IEnumerable<WgSection> otherPeers, string dns)
     {
         var otherRoutes = otherPeers.SelectMany(peer => SplitList(peer.Get("AllowedIPs"))).ToList();
         foreach (var token in SplitList(dns))
         {
-            if (!IPAddress.TryParse(token, out var ip)) continue; // Suchdomäne
+            // WireGuard wertet nur exakte IP-Adressen als DNS-Server, alles andere (z. B. "010.0.0.1") als Suchdomäne.
+            if (!Cidr.TryParseIp(token, out var ip)) continue;
             if (routes.Concat(otherRoutes).Any(route => CoversAddress(route, ip))) continue;
             routes.Add($"{ip}/{(ip.AddressFamily == AddressFamily.InterNetwork ? 32 : 128)}");
         }

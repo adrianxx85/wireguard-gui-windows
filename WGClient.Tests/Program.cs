@@ -70,6 +70,11 @@ Run("Cidr.IsValidDnsEntry", () =>
     Assert(Cidr.IsValidDnsEntry("2606:4700:4700::1111"), "v6");
     Assert(Cidr.IsValidDnsEntry("fritz.box"), "search domain");
     Assert(Cidr.IsValidDnsEntry("corp.internal"), "search domain 2");
+    Assert(Cidr.IsValidDnsEntry("_msdcs.corp"), "underscore search domain");
+    Assert(Cidr.IsValidDnsEntry("corp.example."), "trailing dot");
+    Assert(Cidr.IsValidDnsEntry("büro.example"), "IDN");
+    Assert(!Cidr.IsValidDnsEntry("a..b"), "empty label");
+    Assert(!Cidr.IsValidDnsEntry("010.0.0.1"), "leading-zero v4 not accepted for new entries");
     Assert(!Cidr.IsValidDnsEntry("192.168.1.1/24"), "reject cidr");
     Assert(!Cidr.IsValidDnsEntry("192.168.1"), "reject shortened v4");
     Assert(!Cidr.IsValidDnsEntry("fe80::1%eth0"), "reject v6 scope");
@@ -119,7 +124,7 @@ const string SampleConfig = """
     PersistentKeepalive = 25
     """;
 
-Run("ConfigBuilder AllowLan uses 2000::/3 for IPv6 and clears Endpoint", () =>
+Run("ConfigBuilder AllowLan routes all IPv6 except local ranges and clears Endpoint", () =>
 {
     var original = WgConfig.Parse(SampleConfig);
     var opts = TunnelOptions.FromConfig(original);
@@ -132,11 +137,50 @@ Run("ConfigBuilder AllowLan uses 2000::/3 for IPv6 and clears Endpoint", () =>
     var built = ConfigBuilder.Build(original, opts);
     var peer = built.Peers.Single();
     var allowed = ConfigBuilder.SplitList(peer.Get("AllowedIPs"));
-    Assert(allowed.Contains("2000::/3"), "global unicast v6 routed");
-    Assert(!allowed.Contains("::/1") && !allowed.Contains("8000::/1"), "local v6 not routed");
+    var v6 = allowed.Where(r => r.Contains(':')).Select(r => System.Net.IPNetwork.Parse(r)).ToList();
+    bool Routed(string ip) => v6.Any(n => n.Contains(IPAddress.Parse(ip)));
+    Assert(Routed("2606:4700::1"), "global unicast routed");
+    Assert(Routed("64:ff9b::808:808"), "NAT64 routed");
+    Assert(Routed("64:ff9b:1::1"), "local-use NAT64 routed");
+    Assert(Routed("fec0::1") && Routed("fe00::1") && Routed("f800::1"), "other ranges routed");
+    Assert(!Routed("fe80::1"), "link-local stays local");
+    Assert(!Routed("fd00::1") && !Routed("fc00::1"), "ULA stays local");
+    Assert(!Routed("ff02::fb"), "multicast stays local");
+    Assert(!allowed.Contains("::/0"), "no v6 default route");
     Assert(peer.Get("Endpoint") is null, "endpoint cleared");
     Assert(peer.Get("PersistentKeepalive") is null, "keepalive cleared");
     Assert(!ConfigBuilder.HasKillSwitch(built), "no kill switch with allow lan");
+});
+
+Run("Pre-1.4.3 profile with blank Endpoint keeps imported endpoint", () =>
+{
+    var original = WgConfig.Parse(SampleConfig);
+    var legacyJson = """{ "Dns": "1.1.1.1", "Mode": "FullTunnel", "KillSwitch": true, "IncludeIPv6": true, "PreserveImportedRoutes": true, "Endpoint": "" }""";
+    var json = new System.Text.Json.JsonSerializerOptions { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
+    var legacy = System.Text.Json.JsonSerializer.Deserialize<TunnelOptions>(legacyJson, json)!;
+    Assert(legacy.EndpointExplicit is null, "legacy flag missing");
+    AssertEqual("vpn.example.com:51820", ConfigBuilder.Build(original, legacy).Peers.Single().Get("Endpoint"), "build keeps imported");
+
+    legacy.UpdateImportedDefaults(original);
+    AssertEqual("vpn.example.com:51820", legacy.Endpoint, "migrated endpoint");
+    Assert(legacy.EndpointExplicit == true, "migrated flag");
+
+    var vm = new TunnelVm("test", original, legacy);
+    AssertEqual("vpn.example.com:51820", vm.Endpoint, "vm shows endpoint");
+    Assert(vm.TryGetOptions(out var saved, out _) && saved.EndpointExplicit == true, "saved as explicit");
+});
+
+Run("TunnelVm accepts imported DNS entries WireGuard accepts", () =>
+{
+    var cfg = WgConfig.Parse(SampleConfig.Replace("DNS = 1.1.1.1", "DNS = 10.0.0.53, _corp.example, 010.0.0.1"));
+    var vm = new TunnelVm("test", cfg, TunnelOptions.FromConfig(cfg));
+    Assert(!vm.HasValidationError, "no validation error on load");
+    Assert(vm.TryGetOptions(out var opts, out _), "imported dns saveable");
+    var routes = ConfigBuilder.SplitList(ConfigBuilder.Build(cfg, opts).Peers.Single().Get("AllowedIPs"));
+    Assert(!routes.Any(r => r.StartsWith("8.0.0.1") || r.StartsWith("10.0.0.1/")), "non-canonical v4 not routed as server");
+
+    vm.Dns = "10.0.0.53, _corp.example, 010.0.0.1, 192.168.1";
+    Assert(!vm.TryGetOptions(out _, out var err) && err!.Contains("192.168.1"), "new shortened v4 rejected");
 });
 
 Run("WgConfig Serialize masks secrets", () =>

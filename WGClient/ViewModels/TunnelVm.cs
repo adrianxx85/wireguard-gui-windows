@@ -229,8 +229,11 @@ public sealed class TunnelVm : ObservableObject
         options = new TunnelOptions();
         error = null;
 
+        // Nur neu eingetragene Werte streng prüfen: importierte Einträge, mit denen WireGuard bereits verbindet,
+        // sollen Speichern/Export nicht blockieren.
         var dnsEntries = ConfigBuilder.SplitList(Dns);
-        if (dnsEntries.FirstOrDefault(d => !Cidr.IsValidDnsEntry(d)) is { } badDns)
+        var savedDns = ConfigBuilder.SplitList(Saved.Dns).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (dnsEntries.FirstOrDefault(d => !savedDns.Contains(d) && !Cidr.IsValidDnsEntry(d)) is { } badDns)
         { error = $"Ungültiger DNS-Eintrag: {badDns}"; return false; }
 
         int? mtu = null, keepalive = null;
@@ -282,6 +285,7 @@ public sealed class TunnelVm : ObservableObject
             PreserveImportedRoutes = preserveRoutes,
             SplitAllowedIps = string.Join(", ", splitRoutes),
             Endpoint = ep,
+            EndpointExplicit = true,
             Mtu = mtu,
             PersistentKeepalive = keepalive,
             Autostart = Autostart,

@@ -19,6 +19,13 @@ public sealed class TunnelOptions
     public string SplitAllowedIps { get; set; } = "";
 
     public string Endpoint { get; set; } = "";
+
+    /// <summary>
+    /// true: <see cref="Endpoint"/> gilt wie eingetragen, leer entfernt den Endpoint.
+    /// null: Profil von vor 1.4.3 – dort bedeutete ein leeres Feld „importierten Endpoint verwenden“.
+    /// </summary>
+    public bool? EndpointExplicit { get; set; }
+
     public int? Mtu { get; set; }
     public int? PersistentKeepalive { get; set; }
     public bool Autostart { get; set; }
@@ -44,6 +51,7 @@ public sealed class TunnelOptions
             PreserveImportedRoutes = true,
             SplitAllowedIps = full ? "" : string.Join(", ", allowed),
             Endpoint = peer?.Get("Endpoint") ?? "",
+            EndpointExplicit = true,
             Mtu = int.TryParse(iface?.Get("MTU"), out var mtu) ? mtu : null,
             PersistentKeepalive = int.TryParse(peer?.Get("PersistentKeepalive"), out var ka) ? ka : null,
         };
@@ -66,6 +74,11 @@ public sealed class TunnelOptions
                 IncludeIPv6 = imported.IncludeIPv6;
                 KillSwitch = imported.KillSwitch;
             }
+        }
+        if (EndpointExplicit != true)
+        {
+            if (string.IsNullOrWhiteSpace(Endpoint)) Endpoint = imported.Endpoint;
+            EndpointExplicit = true;
         }
         if (!ConfigBuilder.SupportsKillSwitch(cfg)) KillSwitch = false;
     }

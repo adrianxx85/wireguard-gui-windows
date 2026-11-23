@@ -55,8 +55,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            foreach (var path in Core.TunnelStore.TakePendingImports())
+            var paths = Core.TunnelStore.TakePendingImports(out var error);
+            foreach (var path in paths)
                 if (File.Exists(path)) ImportFile(path);
+            if (error is not null)
+                _vm.StatusMessage = "Eine übergebene Datei konnte noch nicht gelesen werden: " + error;
         }
         catch (Exception ex) { _vm.StatusMessage = "Übergebene Datei konnte nicht importiert werden: " + ex.Message; }
     }
