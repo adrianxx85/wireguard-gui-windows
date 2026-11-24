@@ -84,11 +84,18 @@ public partial class SettingsWindow : Window
                 }
                 else if (installed is null || WireGuardUpdates.IsNewer(latest, installed))
                 {
-                    _officialUpdate = latest;
-                    ShowAction("WireGuard aktualisieren");
-                    UpdateStatus.Text = installed is null
-                        ? $"Der offizielle Updater kann die Installation mit Version {latest} abgleichen."
-                        : $"WireGuard für Windows {latest} ist verfügbar.";
+                    if (!App.IsAdmin)
+                    {
+                        UpdateStatus.Text = $"WireGuard für Windows {latest} ist verfügbar. Zum Aktualisieren bitte WG Client als Administrator öffnen.";
+                    }
+                    else
+                    {
+                        _officialUpdate = latest;
+                        ShowAction("WireGuard aktualisieren");
+                        UpdateStatus.Text = installed is null
+                            ? $"Der offizielle Updater kann die Installation mit Version {latest} abgleichen."
+                            : $"WireGuard für Windows {latest} ist verfügbar.";
+                    }
                 }
                 else UpdateStatus.Text = $"WireGuard für Windows ist aktuell. Letzte Version: {latest}.";
             }

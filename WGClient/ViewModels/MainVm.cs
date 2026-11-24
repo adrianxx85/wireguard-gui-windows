@@ -9,10 +9,19 @@ public sealed class MainVm : ObservableObject
     bool _refreshing;
     int _logRequestVersion;
 
-    public MainVm()
+    public MainVm() : this(App.IsAdmin) { }
+
+    internal MainVm(bool isAdmin)
     {
+        IsAdmin = isAdmin;
         Tunnels.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoTunnels));
     }
+
+    public bool IsAdmin { get; }
+    public bool IsStandardUser => !IsAdmin;
+
+    bool _managerUnavailable;
+    public bool ManagerUnavailable { get => _managerUnavailable; private set => Set(ref _managerUnavailable, value); }
 
     public ObservableCollection<TunnelVm> Tunnels { get; } = [];
 
@@ -47,7 +56,17 @@ public sealed class MainVm : ObservableObject
     /// <summary>Wird ausgelöst, wenn sich der Verbindungsstatus irgendeines Tunnels ändert (Tray-Icon).</summary>
     public event Action? StatesChanged;
 
-    public void Load()
+    public async Task LoadAsync()
+    {
+        if (IsAdmin)
+        {
+            LoadDirect();
+            return;
+        }
+        await LoadViaManagerAsync();
+    }
+
+    void LoadDirect()
     {
         Tunnels.Clear();
         foreach (var name in _store.ListNames())
@@ -69,9 +88,34 @@ public sealed class MainVm : ObservableObject
         foreach (var t in Tunnels) t.State = WireGuardService.GetState(t.Name);
     }
 
+    async Task LoadViaManagerAsync()
+    {
+        var previousName = Selected?.Name;
+        try
+        {
+            var snapshots = await ManagerClient.ListAsync();
+            ManagerUnavailable = false;
+            Tunnels.Clear();
+            foreach (var snapshot in snapshots)
+                Tunnels.Add(new TunnelVm(snapshot));
+            Selected = previousName is not null
+                ? Tunnels.FirstOrDefault(t => t.Name.Equals(previousName, StringComparison.OrdinalIgnoreCase)) ?? Tunnels.FirstOrDefault()
+                : Tunnels.FirstOrDefault();
+            StatusMessage = Tunnels.Count == 0 ? "Keine Tunnel eingerichtet." : "Bereit (Standardbenutzer)";
+        }
+        catch (Exception ex)
+        {
+            ManagerUnavailable = true;
+            StatusMessage = ex.Message;
+        }
+    }
+
     /// <returns>Den importierten Tunnel oder null, wenn der Benutzer abgebrochen hat.</returns>
-    public TunnelVm? Import(string path, Func<string, bool> confirmOverwrite) =>
-        Add(Path.GetFileNameWithoutExtension(path), File.ReadAllText(path), confirmOverwrite);
+    public TunnelVm? Import(string path, Func<string, bool> confirmOverwrite)
+    {
+        EnsureAdmin();
+        return Add(Path.GetFileNameWithoutExtension(path), File.ReadAllText(path), confirmOverwrite);
+    }
 
     public bool NameExists(string name)
     {
@@ -81,12 +125,13 @@ public sealed class MainVm : ObservableObject
 
     /// <summary>Tunnel-Adressen aller bekannten Tunnel – der Assistent schlägt nur freie Netze vor.</summary>
     public List<string> TunnelAddresses() =>
-        Tunnels.SelectMany(t => ConfigBuilder.SplitList(t.Original.Interface?.Get("Address"))).ToList();
+        Tunnels.SelectMany(t => ConfigBuilder.SplitList(t.Original?.Interface?.Get("Address") ?? t.AddressText)).ToList();
 
     /// <summary>Legt einen Tunnel aus Konfigurationstext an (Import oder Assistent).</summary>
     /// <returns>Den Tunnel oder null, wenn der Benutzer das Überschreiben abgelehnt hat.</returns>
     public TunnelVm? Add(string requestedName, string text, Func<string, bool> confirmOverwrite)
     {
+        EnsureAdmin();
         var cfg = WgConfig.Parse(text);
         var errors = cfg.Validate();
         if (errors.Count > 0) throw new FormatException(string.Join(Environment.NewLine, errors));
@@ -128,13 +173,23 @@ public sealed class MainVm : ObservableObject
 
     public async Task ConnectAsync(TunnelVm t)
     {
-        var cfg = ConfigBuilder.Build(t.Original, t.Saved);
-        var errors = cfg.Validate();
-        if (errors.Count > 0) throw new InvalidOperationException(string.Join(Environment.NewLine, errors));
-
         var running = false;
-        await RunBusy(t, $"Verbinde \"{t.Name}\" …", async () =>
-            running = await WireGuardService.ConnectAsync(t.Name, t.Saved.Autostart, () => _store.WriteActive(t.Name, cfg.Serialize())));
+        if (IsAdmin)
+        {
+            var original = t.Original ?? throw new InvalidOperationException("Konfiguration ist nicht geladen.");
+            var cfg = ConfigBuilder.Build(original, t.Saved);
+            var errors = cfg.Validate();
+            if (errors.Count > 0) throw new InvalidOperationException(string.Join(Environment.NewLine, errors));
+
+            await RunBusy(t, $"Verbinde \"{t.Name}\" …", async () =>
+                running = await WireGuardService.ConnectAsync(t.Name, t.Saved.Autostart, () => _store.WriteActive(t.Name, cfg.Serialize())));
+        }
+        else
+        {
+            await RunBusy(t, $"Verbinde \"{t.Name}\" …", async () =>
+                running = await ManagerClient.ConnectAsync(t.Name));
+        }
+
         StatusMessage = running
             ? $"\"{t.Name}\" gestartet."
             : $"\"{t.Name}\" startet noch (WireGuard wartet z. B. auf Netzwerk/DNS). Details im Log.";
@@ -142,12 +197,17 @@ public sealed class MainVm : ObservableObject
 
     public async Task DisconnectAsync(TunnelVm t)
     {
-        await RunBusy(t, $"Trenne \"{t.Name}\" …", () => WireGuardService.DisconnectAsync(t.Name));
+        if (IsAdmin)
+            await RunBusy(t, $"Trenne \"{t.Name}\" …", () => WireGuardService.DisconnectAsync(t.Name));
+        else
+            await RunBusy(t, $"Trenne \"{t.Name}\" …", () => ManagerClient.DisconnectAsync(t.Name));
+
         StatusMessage = $"\"{t.Name}\" getrennt.";
     }
 
     public async Task SaveAsync(TunnelVm t, bool reconnectIfActive = true)
     {
+        EnsureAdmin();
         EnsureIdle(t);
         if (!t.TryGetOptions(out var opts, out var error))
             throw new InvalidOperationException(error);
@@ -169,6 +229,7 @@ public sealed class MainVm : ObservableObject
 
     public async Task DeleteAsync(TunnelVm t)
     {
+        EnsureAdmin();
         await RunBusy(t, $"Entferne \"{t.Name}\" …", async () =>
         {
             await WireGuardService.DisconnectAsync(t.Name);
@@ -182,9 +243,11 @@ public sealed class MainVm : ObservableObject
 
     public void Export(TunnelVm t, string path)
     {
+        EnsureAdmin();
+        var original = t.Original ?? throw new InvalidOperationException("Konfiguration ist nicht geladen.");
         if (!t.TryGetOptions(out var opts, out var error))
             throw new InvalidOperationException(error ?? "Ungültige Optionen können nicht exportiert werden.");
-        File.WriteAllText(path, ConfigBuilder.Build(t.Original, opts).Serialize());
+        File.WriteAllText(path, ConfigBuilder.Build(original, opts).Serialize());
         StatusMessage = $"Konfiguration exportiert nach {path}";
     }
 
@@ -193,7 +256,9 @@ public sealed class MainVm : ObservableObject
         var version = ++_logRequestVersion;
         var filter = LogOnlySelected ? Selected?.Name : null;
         LogText = "Lade Log …";
-        var text = await WireGuardService.DumpLogAsync(filter);
+        var text = IsAdmin
+            ? await WireGuardService.DumpLogAsync(filter)
+            : await ManagerClient.DumpLogAsync(filter);
         if (version != _logRequestVersion) return;
         LogText = string.IsNullOrWhiteSpace(text) ? "(keine Einträge)" : text;
     }
@@ -205,21 +270,53 @@ public sealed class MainVm : ObservableObject
         try
         {
             var before = AnyActive;
-            foreach (var t in Tunnels.ToList())
+            if (IsAdmin)
             {
-                if (t.IsBusy || !Tunnels.Contains(t)) continue;
-                var state = await Task.Run(() => WireGuardService.GetState(t.Name));
-                if (t.IsBusy || !Tunnels.Contains(t)) continue;
-                t.State = state;
-                if (state == TunnelState.Running)
+                foreach (var t in Tunnels.ToList())
                 {
-                    var stats = await WireGuardService.GetStatsAsync(t.Name);
-                    if (!t.IsBusy && t.State == TunnelState.Running && Tunnels.Contains(t))
-                        t.Stats = stats;
+                    if (t.IsBusy || !Tunnels.Contains(t)) continue;
+                    var state = await Task.Run(() => WireGuardService.GetState(t.Name));
+                    if (t.IsBusy || !Tunnels.Contains(t)) continue;
+                    t.State = state;
+                    if (state == TunnelState.Running)
+                    {
+                        var stats = await WireGuardService.GetStatsAsync(t.Name);
+                        if (!t.IsBusy && t.State == TunnelState.Running && Tunnels.Contains(t))
+                            t.Stats = stats;
+                    }
+                    else
+                    {
+                        t.Stats = null;
+                    }
                 }
-                else
+            }
+            else
+            {
+                try
                 {
-                    t.Stats = null;
+                    var states = await ManagerClient.GetStatesAsync();
+                    var wasUnavailable = ManagerUnavailable;
+                    ManagerUnavailable = false;
+                    var knownNames = Tunnels.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var remoteNames = states.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    if (wasUnavailable || !knownNames.SetEquals(remoteNames))
+                    {
+                        await LoadViaManagerAsync();
+                    }
+                    else
+                    {
+                        var byName = states.ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+                        foreach (var t in Tunnels.ToList())
+                        {
+                            if (t.IsBusy || !byName.TryGetValue(t.Name, out var s)) continue;
+                            t.State = s.State;
+                            t.Stats = s.State == TunnelState.Running ? s.Stats : null;
+                        }
+                    }
+                }
+                catch
+                {
+                    ManagerUnavailable = true;
                 }
             }
             if (before != AnyActive) OnPropertyChanged(nameof(AnyActive));
@@ -238,12 +335,31 @@ public sealed class MainVm : ObservableObject
         {
             try
             {
-                t.State = WireGuardService.GetState(t.Name);
+                if (IsAdmin)
+                {
+                    t.State = WireGuardService.GetState(t.Name);
+                }
+                else
+                {
+                    try
+                    {
+                        var states = await ManagerClient.GetStatesAsync();
+                        if (states.FirstOrDefault(s => s.Name.Equals(t.Name, StringComparison.OrdinalIgnoreCase)) is { } s)
+                            t.State = s.State;
+                    }
+                    catch { /* nächster Timer-Tick aktualisiert den Status */ }
+                }
                 t.Stats = null;
                 StatesChanged?.Invoke();
             }
             finally { t.IsBusy = false; }
         }
+    }
+
+    void EnsureAdmin()
+    {
+        if (!IsAdmin)
+            throw new UnauthorizedAccessException("Diese Aktion erfordert Administratorrechte.");
     }
 
     void EnsureIdle(TunnelVm t)

@@ -25,6 +25,7 @@
   - Endpoint, MTU, Keepalive
   - Beim Windows-Start automatisch verbinden
 - **Vorschau** der effektiven Konfiguration und WireGuard-Log
+- **Standardbenutzer-Modus** – einmalig eingerichtet können Standardbenutzer bestehende Tunnel ohne UAC-Abfrage verbinden, trennen und Live-Status/Log einsehen; Import, Bearbeiten und Löschen bleiben Administratoren vorbehalten
 - **Tray-Icon** – Tunnel laufen als Windows-Dienst weiter, auch wenn die App geschlossen ist
 - Konfigurationen werden geschützt unter `C:\ProgramData\WGClient` abgelegt (nur Administratoren/SYSTEM)
 
@@ -44,7 +45,7 @@ Fehlen [WireGuard für Windows](https://www.wireguard.com/install/) oder die .NE
 
 Ausführliche Bedienungsanleitung: [ANLEITUNG.md](ANLEITUNG.md)
 
-**Voraussetzungen:** Windows 10/11 (x64), Administratorrechte
+**Voraussetzungen:** Windows 10/11 (x64); Administratorrechte zur Installation und zum Einrichten von Tunneln (Verbinden/Trennen funktioniert auch als Standardbenutzer)
 
 ## Wie es funktioniert
 

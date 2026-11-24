@@ -17,6 +17,12 @@ public sealed class TunnelVm : ObservableObject
 
     static Brush Freeze(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
 
+    readonly string? _snapshotAddress;
+    readonly int _snapshotPeerCount;
+    readonly bool _snapshotUsesManualRoutes;
+    readonly bool _snapshotSupportsKillSwitch;
+    readonly string? _snapshotRoutingSummary;
+
     public TunnelVm(string name, WgConfig original, TunnelOptions options)
     {
         Name = name;
@@ -26,13 +32,31 @@ public sealed class TunnelVm : ObservableObject
         LoadEdit(options);
     }
 
+    internal TunnelVm(TunnelSnapshot snapshot)
+    {
+        IsReadOnly = true;
+        Name = snapshot.Name;
+        Saved = snapshot.Options;
+        _snapshotAddress = snapshot.AddressText;
+        _snapshotPeerCount = snapshot.PeerCount;
+        _snapshotUsesManualRoutes = snapshot.UsesManualRoutes;
+        _snapshotSupportsKillSwitch = snapshot.SupportsKillSwitch;
+        _snapshotRoutingSummary = snapshot.RoutingSummary;
+        _state = snapshot.State;
+        _allowedIpsPreview = snapshot.AllowedIpsPreview;
+        _effectivePreview = snapshot.EffectivePreview;
+        LoadEdit(snapshot.Options);
+    }
+
+    public bool IsReadOnly { get; }
     public string Name { get; }
-    public WgConfig Original { get; private set; }
+    public WgConfig? Original { get; private set; }
     public TunnelOptions Saved { get; private set; }
 
     public IReadOnlyList<ServerPeerChoice> ServerPeers { get; private set; } = [];
-    public bool HasMultipleServerPeers => ServerPeers.Count > 1;
-    public bool CanCopyServerPeer => SelectedServerPeer is not null;
+    public bool HasMultipleServerPeers => !IsReadOnly && ServerPeers.Count > 1;
+    public bool CanCopyServerPeer => !IsReadOnly && SelectedServerPeer is not null;
+    public bool CanExport => !IsReadOnly;
 
     ServerPeerChoice? _selectedServerPeer;
     public ServerPeerChoice? SelectedServerPeer
@@ -43,6 +67,13 @@ public sealed class TunnelVm : ObservableObject
 
     void LoadServerPeers()
     {
+        if (Original is null)
+        {
+            ServerPeers = [];
+            SelectedServerPeer = null;
+            OnPropertyChanged(nameof(ServerPeers), nameof(HasMultipleServerPeers));
+            return;
+        }
         ServerPeers = Original.Peers.Select((peer, index) =>
         {
             var endpoint = peer.Get("Endpoint");
@@ -78,8 +109,8 @@ public sealed class TunnelVm : ObservableObject
 
     public bool IsActive => State is TunnelState.Running or TunnelState.Starting;
     public bool CanToggle => !IsBusy && State is not TunnelState.Stopping;
-    public bool CanRemove => !IsBusy;
-    public bool CanSave => IsDirty && !IsBusy;
+    public bool CanRemove => !IsReadOnly && !IsBusy;
+    public bool CanSave => !IsReadOnly && IsDirty && !IsBusy;
     bool HasRecentHandshake => Stats?.LastHandshake is { } h && DateTimeOffset.UtcNow - h < TimeSpan.FromMinutes(3);
 
     public string StateText => IsBusy ? "Bitte warten …" : State switch
@@ -101,16 +132,17 @@ public sealed class TunnelVm : ObservableObject
     public string RxText => Stats is null ? "—" : FormatBytes(Stats.RxBytes);
     public string TxText => Stats is null ? "—" : FormatBytes(Stats.TxBytes);
     public string EndpointText => Stats?.Endpoint ?? (string.IsNullOrWhiteSpace(Saved.Endpoint) ? "—" : Saved.Endpoint);
-    public string AddressText => Original.Interface?.Get("Address") ?? "—";
+    public string AddressText => Original is not null ? Original.Interface?.Get("Address") ?? "—" : _snapshotAddress ?? "—";
     public string DnsText => string.IsNullOrWhiteSpace(Saved.Dns) ? "System-DNS" : Saved.Dns;
     public string Subtitle => string.IsNullOrWhiteSpace(Saved.Endpoint) ? AddressText : Saved.Endpoint;
-    public string PeerCountText => $"{Original.Peers.Count()} Peer(s)";
-    public bool UsesManualRoutes => ConfigBuilder.UsesManualRoutes(Original);
+    public string PeerCountText => $"{(Original is not null ? Original.Peers.Count() : _snapshotPeerCount)} Peer(s)";
+    public bool UsesManualRoutes => Original is not null ? ConfigBuilder.UsesManualRoutes(Original) : _snapshotUsesManualRoutes;
 
     public string RoutingSummary
     {
         get
         {
+            if (Original is null) return _snapshotRoutingSummary ?? "—";
             if (UsesManualRoutes) return "Manuelle Routen (Table = off)";
             var summary = Saved.Mode == RouteMode.Split
                 ? "Split-Tunnel: " + (string.IsNullOrWhiteSpace(Saved.SplitAllowedIps) ? "—" : Saved.SplitAllowedIps)
@@ -159,7 +191,7 @@ public sealed class TunnelVm : ObservableObject
         get => _allowLan;
         set { if (SetEdit(ref _allowLan, value)) OnPropertyChanged(nameof(KillSwitchEnabled)); }
     }
-    public bool KillSwitchEnabled => !AllowLan && ConfigBuilder.SupportsKillSwitch(Original);
+    public bool KillSwitchEnabled => !IsReadOnly && !AllowLan && (Original is not null ? ConfigBuilder.SupportsKillSwitch(Original) : _snapshotSupportsKillSwitch);
 
     string _lanExceptions = "";
     public string LanExceptions { get => _lanExceptions; set => SetEdit(ref _lanExceptions, value); }
@@ -295,6 +327,7 @@ public sealed class TunnelVm : ObservableObject
 
     void UpdatePreview()
     {
+        if (Original is null) return;
         if (TryGetOptions(out var o, out var err))
         {
             ValidationError = null;

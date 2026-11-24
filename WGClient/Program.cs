@@ -17,6 +17,25 @@ public static class Program
             catch (Exception) { return 2; }
         }
 
+        // Manager-Dienst (LocalSystem): erlaubt Standardbenutzern Verbinden/Trennen bestehender Tunnel über Named Pipe.
+        if (args.Length == 1 && args[0] == Core.ManagerService.ManagerSwitch)
+        {
+            try { return Core.ManagerService.RunAsService(); }
+            catch (Exception) { return 2; }
+        }
+
+        if (args.Length == 1 && args[0] == Core.ManagerService.InstallSwitch)
+        {
+            try { return Core.ManagerService.InstallAndStart(); }
+            catch (Exception) { return 2; }
+        }
+
+        if (args.Length == 1 && args[0] == Core.ManagerService.UninstallSwitch)
+        {
+            try { return Core.ManagerService.Uninstall(); }
+            catch (Exception) { return 2; }
+        }
+
         // Standalone-Edition: Windows startet WGClient.exe als Tunnel-Dienst ("/service <conf>") – ohne Oberfläche.
         if (args.Length == 2 && args[0] == Core.EmbeddedTunnel.ServiceSwitch)
             return Core.EmbeddedTunnel.IsAvailable ? Core.EmbeddedTunnel.RunService(args[1]) : 3;

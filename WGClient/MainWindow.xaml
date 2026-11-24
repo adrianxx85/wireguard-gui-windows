@@ -24,8 +24,10 @@
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                    <Button Content="+  Konfiguration importieren" Style="{StaticResource AccentButton}" Click="Import_Click" Padding="14,9"/>
-                    <Button Content="✎  Neuen Tunnel erstellen" Click="NewTunnel_Click" Padding="14,8" Margin="0,6,0,0"/>
+                    <Button Content="+  Konfiguration importieren" Style="{StaticResource AccentButton}" Click="Import_Click" Padding="14,9"
+                            IsEnabled="{Binding IsAdmin}" ToolTip="Konfiguration importieren (erfordert Administratorrechte)"/>
+                    <Button Content="✎  Neuen Tunnel erstellen" Click="NewTunnel_Click" Padding="14,8" Margin="0,6,0,0"
+                            IsEnabled="{Binding IsAdmin}" ToolTip="Neuen Tunnel mit dem Assistenten erstellen (erfordert Administratorrechte)"/>
                     <Button Content="Tunnel entfernen" Style="{StaticResource GhostButton}" Margin="0,6,0,0"
                             Click="Delete_Click" IsEnabled="{Binding Selected.CanRemove, FallbackValue=False}"/>
                     <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,12,0,12"/>
@@ -77,6 +79,22 @@
                 </TextBlock>
             </Border>
 
+            <Border DockPanel.Dock="Top" Background="#16263F" BorderBrush="#2B4A7A" BorderThickness="0,0,0,1" Padding="16,9"
+                    Visibility="{Binding IsStandardUser, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Als Administrator öffnen" Click="Elevate_Click"
+                            Padding="12,5" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="#CFE0FF" VerticalAlignment="Center"
+                               Text="Standardbenutzer-Modus: Eingerichtete Tunnel können verbunden und getrennt werden. Zum Importieren oder Bearbeiten sind Administratorrechte nötig."/>
+                </DockPanel>
+            </Border>
+
+            <Border DockPanel.Dock="Top" Background="#3A2A12" Padding="16,10"
+                    Visibility="{Binding ManagerUnavailable, Converter={StaticResource BoolToVis}}">
+                <TextBlock TextWrapping="Wrap" Foreground="#F5C27A"
+                           Text="Der Dienst „WG Client Manager“ ist nicht erreichbar. Bitte WG Client über den Installer einrichten oder als Administrator öffnen."/>
+            </Border>
+
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="20,7">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Right" Text="{x:Static local:App.VersionLabel}" Style="{StaticResource Muted}"
@@ -92,10 +110,14 @@
                     <TextBlock Text="Kein Tunnel ausgewählt" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                     <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" Margin="0,8,0,18" FontSize="13"
                                Text="Importiere eine WireGuard-Konfiguration (.conf), ziehe sie in dieses Fenster – oder erstelle einen neuen Tunnel mit dem Assistenten."/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                Visibility="{Binding IsAdmin, Converter={StaticResource BoolToVis}}">
                         <Button Content="Konfiguration importieren" Style="{StaticResource AccentButton}" Padding="18,9" Click="Import_Click"/>
                         <Button Content="Neuen Tunnel erstellen" Padding="18,9" Margin="10,0,0,0" Click="NewTunnel_Click"/>
                     </StackPanel>
+                    <Button Content="Als Administrator öffnen" Style="{StaticResource AccentButton}" Padding="18,9"
+                            HorizontalAlignment="Center" Click="Elevate_Click"
+                            Visibility="{Binding IsStandardUser, Converter={StaticResource BoolToVis}}"/>
                 </StackPanel>
 
                 <!-- Details -->
@@ -180,7 +202,8 @@
                         <!-- ===== Optionen ===== -->
                         <TabItem Header="Optionen">
                             <DockPanel>
-                                <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+                                <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0"
+                                        Visibility="{Binding DataContext.IsAdmin, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                             <Button Content="Verwerfen" Style="{StaticResource GhostButton}" Margin="0,0,8,0"
@@ -194,7 +217,8 @@
                                 </Border>
 
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                    <StackPanel MaxWidth="680" HorizontalAlignment="Left" Margin="0,0,16,16">
+                                    <StackPanel MaxWidth="680" HorizontalAlignment="Left" Margin="0,0,16,16"
+                                                IsEnabled="{Binding DataContext.IsAdmin, RelativeSource={RelativeSource AncestorType=Window}}">
 
                                         <TextBlock Text="DNS" Style="{StaticResource SectionHeader}" Margin="0,0,0,10"/>
                                         <TextBox Text="{Binding Dns, UpdateSourceTrigger=PropertyChanged}"/>
@@ -298,7 +322,8 @@
                         <TabItem Header="Konfiguration">
                             <DockPanel>
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                                    <Button DockPanel.Dock="Right" Content="Exportieren …" Click="Export_Click"/>
+                                    <Button DockPanel.Dock="Right" Content="Exportieren …" Click="Export_Click"
+                                            IsEnabled="{Binding CanExport}"/>
                                     <Button DockPanel.Dock="Right" Content="Server-Block kopieren" Click="CopyServerPeer_Click" Margin="0,0,8,0"
                                             IsEnabled="{Binding CanCopyServerPeer}"
                                             ToolTip="Kopiert den [Peer]-Block für die ausgewählte Gegenstelle, einschließlich ihres optionalen Pre-shared Keys."/>

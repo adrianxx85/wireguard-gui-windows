@@ -4,8 +4,8 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- Tunnel-Dienste installieren/entfernen erfordert Administratorrechte -->
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <!-- Standardbenutzer steuern Tunnel über den WGClientManager-Dienst; Admin-Aktionen erhöhen bei Bedarf per UAC -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

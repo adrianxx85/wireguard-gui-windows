@@ -312,5 +312,73 @@ Run("TunnelVm validation rejects invalid DNS and signed MTU", () =>
     AssertEqual(1420, opts.Mtu);
 });
 
+Run("ManagerService.CreateSnapshot never exposes PrivateKey or PresharedKey", () =>
+{
+    var cfg = WgConfig.Parse(SampleConfig);
+    var opts = TunnelOptions.FromConfig(cfg);
+    var snapshot = ManagerService.CreateSnapshot("office", cfg, opts, TunnelState.Running);
+    var json = System.Text.Json.JsonSerializer.Serialize(snapshot, ManagerProtocol.Json);
+    Assert(!json.Contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="), "private key leaked in snapshot");
+    Assert(!json.Contains("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="), "preshared key leaked in snapshot");
+    Assert(snapshot.EffectivePreview.Contains("(verborgen)"), "secrets masked in preview");
+
+    var roVm = new TunnelVm(snapshot);
+    Assert(roVm.IsReadOnly, "read-only vm");
+    Assert(roVm.Original is null, "no raw config on standard-user vm");
+    Assert(!roVm.CanRemove && !roVm.CanExport && !roVm.CanCopyServerPeer && !roVm.CanSave, "admin actions disabled");
+    Assert(roVm.CanToggle, "toggle remains enabled for standard users");
+});
+
+Run("ManagerClient and ManagerService Named Pipe IPC round-trip", () =>
+{
+    var pipeName = "WGClientTest_" + Guid.NewGuid().ToString("N");
+    using var cts = new CancellationTokenSource();
+    var connected = false;
+    var serverTask = ManagerService.RunPipeServerAsync(pipeName, security: null, req =>
+    {
+        switch (req.Command)
+        {
+            case "ping": return Task.FromResult(new ManagerResponse(true));
+            case "list":
+                var cfg = WgConfig.Parse(SampleConfig);
+                return Task.FromResult(new ManagerResponse(true, Tunnels: [ManagerService.CreateSnapshot("home", cfg, TunnelOptions.FromConfig(cfg), TunnelState.Disconnected)]));
+            case "connect" when req.Name == "home":
+                connected = true;
+                return Task.FromResult(new ManagerResponse(true, Running: true, State: TunnelState.Running));
+            case "disconnect" when req.Name == "home":
+                connected = false;
+                return Task.FromResult(new ManagerResponse(true, State: TunnelState.Disconnected));
+            case "log":
+                return Task.FromResult(new ManagerResponse(true, Log: "2026-11-24 08:00:00.000000: [home] OK"));
+            default:
+                return Task.FromResult(new ManagerResponse(false, "Abgelehnt"));
+        }
+    }, cts.Token);
+
+    try
+    {
+        Assert(ManagerClient.PingAsync(pipeName).GetAwaiter().GetResult(), "ping ok");
+        var list = ManagerClient.ListAsync(pipeName).GetAwaiter().GetResult();
+        AssertEqual(1, list.Count, "list count");
+        AssertEqual("home", list[0].Name, "tunnel name");
+        Assert(ManagerClient.ConnectAsync("home", pipeName).GetAwaiter().GetResult(), "connect ok");
+        Assert(connected, "server marked connected");
+        ManagerClient.DisconnectAsync("home", pipeName).GetAwaiter().GetResult();
+        Assert(!connected, "server marked disconnected");
+        var log = ManagerClient.DumpLogAsync("home", pipeName).GetAwaiter().GetResult();
+        Assert(log.Contains("[home] OK"), "log returned");
+
+        var unknownFailed = false;
+        try { ManagerClient.ConnectAsync("unknown", pipeName).GetAwaiter().GetResult(); }
+        catch (InvalidOperationException) { unknownFailed = true; }
+        Assert(unknownFailed, "unknown tunnel rejected");
+    }
+    finally
+    {
+        cts.Cancel();
+        serverTask.GetAwaiter().GetResult();
+    }
+});
+
 Console.WriteLine($"Tests: {passed} passed, {failed} failed.");
 return failed == 0 ? 0 : 1;

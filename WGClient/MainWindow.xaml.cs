@@ -29,27 +29,35 @@ public partial class MainWindow : Window
         _vm.StatesChanged += UpdateTray;
     }
 
-    void OnLoaded(object sender, RoutedEventArgs e)
+    async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        try { _vm.Load(); }
+        try { await _vm.LoadAsync(); }
         catch (Exception ex) { ShowError("Tunnel konnten nicht geladen werden", ex); }
 
         _tray = new TrayIcon(ShowFromTray, () => App.OpenUrl(App.CoffeeUrl), ExitApp);
         UpdateTray();
         _timer.Start();
 
-        // .conf als Startargument (z. B. "Öffnen mit") sowie ggf. während des Starts eingereihte Imports
-        var arg = App.FindConfArg(Environment.GetCommandLineArgs().Skip(1));
-        if (arg is not null) ImportFile(arg);
-        ImportPendingFiles();
+        if (_vm.IsAdmin)
+        {
+            // .conf als Startargument (z. B. "Öffnen mit") sowie ggf. während des Starts eingereihte Imports
+            var arg = App.FindConfArg(Environment.GetCommandLineArgs().Skip(1));
+            if (arg is not null) ImportFile(arg);
+            ImportPendingFiles();
+        }
     }
 
     /// <summary>Eine zweite Instanz wurde gestartet: Fenster zeigen und ggf. übergebene .conf importieren.</summary>
     public void OnExternalActivation()
     {
         ShowFromTray();
-        ImportPendingFiles();
+        if (_vm.IsAdmin) ImportPendingFiles();
     }
+
+    /// <summary>Eine erhöhte Admin-Instanz übernimmt: Standardbenutzer-Fenster sauber beenden.</summary>
+    public void ExitForElevation() => ExitApp();
+
+    void Elevate_Click(object sender, RoutedEventArgs e) => App.TryLaunchElevated();
 
     void ImportPendingFiles()
     {
@@ -215,8 +223,7 @@ public partial class MainWindow : Window
 
     async void CopyServerPeer_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm.Selected is not { SelectedServerPeer: { } selectedPeer } t) return;
-        var original = t.Original;
+        if (_vm.Selected is not { Original: { } original, SelectedServerPeer: { } selectedPeer } t) return;
         try
         {
             var snippet = await Core.ServerPeer.SnippetAsync(t.Name, original, selectedPeer.Peer);
@@ -258,7 +265,14 @@ public partial class MainWindow : Window
     void Window_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
-        foreach (var f in files.Where(f => f.EndsWith(".conf", StringComparison.OrdinalIgnoreCase))) ImportFile(f);
+        var confs = files.Where(f => f.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (confs.Count == 0) return;
+        if (!_vm.IsAdmin)
+        {
+            App.TryLaunchElevated(confs[0]);
+            return;
+        }
+        foreach (var f in confs) ImportFile(f);
     }
 
     // ---------- Hilfen ----------

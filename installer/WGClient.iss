@@ -88,6 +88,7 @@ Filename: "{tmp}\dotnet-desktop-runtime.exe"; Parameters: "/install /quiet /nore
 #ifndef Standalone
 Filename: "{tmp}\wireguard-installer.exe"; StatusMsg: "Installiere WireGuard ..."; Check: ShouldInstallWireGuard; Flags: waituntilterminated
 #endif
+Filename: "{app}\{#MyAppExe}"; Parameters: "/install-manager"; StatusMsg: "Richte WG-Client-Dienst ein ..."; Check: IsDotNetInstalled; Flags: waituntilterminated runhidden
 Filename: "{app}\{#MyAppExe}"; Description: "WG Client jetzt starten"; Flags: postinstall nowait skipifsilent runascurrentuser
 Filename: "{#CoffeeUrl}"; Description: "Gefällt dir WG Client? Spendier mir einen Kaffee (PayPal)"; Flags: postinstall shellexec nowait skipifsilent unchecked
 
@@ -254,6 +255,7 @@ begin
 end;
 
 const
+  ManagerServiceName = 'WGClientManager';
   Stopped = 1;
   StartPending = 2;
   StopPending = 3;
@@ -276,7 +278,12 @@ function CloseServiceHandle(Service: THandle): BOOL;
 function GetTickCount64: Int64;
   external 'GetTickCount64@kernel32.dll stdcall';
 
-function TunnelState(const Name: String): Integer;
+function ServiceKeyByName(const SvcName: String): String;
+begin
+  Result := 'SYSTEM\CurrentControlSet\Services\' + SvcName;
+end;
+
+function ServiceStateByName(const SvcName: String): Integer;
 var
   Manager, Service: THandle;
   Status: TServiceStatus;
@@ -285,7 +292,7 @@ begin
   Manager := OpenSCManager(0, 0, 1); { SC_MANAGER_CONNECT }
   if Manager = 0 then Exit;
   try
-    Service := OpenService(Manager, 'WireGuardTunnel$' + Name, 4); { SERVICE_QUERY_STATUS }
+    Service := OpenService(Manager, SvcName, 4); { SERVICE_QUERY_STATUS }
     if Service = 0 then Exit;
     try
       if QueryServiceStatus(Service, Status) then Result := Status.CurrentState;
@@ -297,16 +304,26 @@ begin
   end;
 end;
 
-function Sc(const Action, Name: String): Boolean;
+function TunnelState(const Name: String): Integer;
+begin
+  Result := ServiceStateByName('WireGuardTunnel$' + Name);
+end;
+
+function ScRaw(const Action, SvcName: String): Boolean;
 var
   ResultCode: Integer;
 begin
-  Result := Exec(ExpandConstant('{sys}\sc.exe'), Action + ' "WireGuardTunnel$' + Name + '"',
+  Result := Exec(ExpandConstant('{sys}\sc.exe'), Action + ' "' + SvcName + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-  if not Result then Log('sc.exe ' + Action + ' fehlgeschlagen für ' + Name + ': ' + IntToStr(ResultCode));
+  if not Result then Log('sc.exe ' + Action + ' fehlgeschlagen für ' + SvcName + ': ' + IntToStr(ResultCode));
 end;
 
-function StopTunnel(const Name: String): Boolean;
+function Sc(const Action, Name: String): Boolean;
+begin
+  Result := ScRaw(Action, 'WireGuardTunnel$' + Name);
+end;
+
+function StopServiceByName(const SvcName: String): Boolean;
 var
   Deadline: Int64;
   State: Integer;
@@ -315,35 +332,45 @@ begin
   StopSent := False;
   Deadline := GetTickCount64 + 30000;
   repeat
-    State := TunnelState(Name);
-    Result := (State = Stopped) or not RegKeyExists(HKLM, ServiceKey(Name));
+    State := ServiceStateByName(SvcName);
+    Result := (State = Stopped) or not RegKeyExists(HKLM, ServiceKeyByName(SvcName));
     if Result then Exit;
     { Auch im Startvorgang wiederholt versuchen: sc stop gelingt, sobald der Dienst Steuerbefehle annimmt }
-    if not StopSent and ((State = StartPending) or (State >= Running)) then StopSent := Sc('stop', Name);
+    if not StopSent and ((State = StartPending) or (State >= Running)) then StopSent := ScRaw('stop', SvcName);
     Sleep(250);
   until GetTickCount64 >= Deadline;
 end;
 
-function StartTunnel(const Name: String): Boolean;
+function StartServiceByName(const SvcName: String): Boolean;
 var
   Deadline: Int64;
   State: Integer;
 begin
   Result := False;
   Deadline := GetTickCount64 + 60000;
-  State := TunnelState(Name);
+  State := ServiceStateByName(SvcName);
   while (State = StopPending) and (GetTickCount64 < Deadline) do
   begin
     Sleep(250);
-    State := TunnelState(Name);
+    State := ServiceStateByName(SvcName);
   end;
-  if (State = Stopped) and not Sc('start', Name) then Exit;
+  if (State = Stopped) and not ScRaw('start', SvcName) then Exit;
   repeat
-    State := TunnelState(Name);
+    State := ServiceStateByName(SvcName);
     Result := State = Running;
     if Result or (State = Stopped) or (State = 0) then Exit;
     Sleep(250);
   until GetTickCount64 >= Deadline;
+end;
+
+function StopTunnel(const Name: String): Boolean;
+begin
+  Result := StopServiceByName('WireGuardTunnel$' + Name);
+end;
+
+function StartTunnel(const Name: String): Boolean;
+begin
+  Result := StartServiceByName('WireGuardTunnel$' + Name);
 end;
 
 function VerifyEmbeddedInstallation: Boolean;
@@ -363,19 +390,24 @@ begin
   end;
 end;
 
-function DeleteTunnelService(const Name: String): Boolean;
+function DeleteServiceByName(const SvcName: String): Boolean;
 var
   ResultCode: Integer;
 begin
-  if not RegKeyExists(HKLM, ServiceKey(Name)) then
+  if not RegKeyExists(HKLM, ServiceKeyByName(SvcName)) then
   begin
     Result := True;
     Exit;
   end;
   { 1060 = Dienst existiert nicht mehr, 1072 = bereits zum Löschen markiert }
-  Result := Exec(ExpandConstant('{sys}\sc.exe'), 'delete "WireGuardTunnel$' + Name + '"',
+  Result := Exec(ExpandConstant('{sys}\sc.exe'), 'delete "' + SvcName + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and ((ResultCode = 0) or (ResultCode = 1060) or (ResultCode = 1072));
-  if not Result then Log('sc.exe delete fehlgeschlagen für ' + Name + ': ' + IntToStr(ResultCode));
+  if not Result then Log('sc.exe delete fehlgeschlagen für ' + SvcName + ': ' + IntToStr(ResultCode));
+end;
+
+function DeleteTunnelService(const Name: String): Boolean;
+begin
+  Result := DeleteServiceByName('WireGuardTunnel$' + Name);
 end;
 
 function StopAppTunnels: Boolean;
@@ -397,17 +429,25 @@ begin
   end;
 end;
 
-{ ---------- Update: eigene Tunnel-Dienste sperren WGClient.exe und tunnel.dll ---------- }
+{ ---------- Update: Manager- und eigene Tunnel-Dienste sperren WGClient.exe und tunnel.dll ---------- }
 
 var
   RestartTunnels, EmbeddedTunnels: TStringList;
-  PostInstallReached, TunnelUpdateFailed, AllTunnelsStopped: Boolean;
+  PostInstallReached, TunnelUpdateFailed, AllTunnelsStopped, ManagerWasRunning: Boolean;
 
 procedure ReportTunnelUpdateFailure(const Message: String);
 begin
   TunnelUpdateFailed := True;
   Log(Message);
   if not WizardSilent then MsgBox(Message, mbError, MB_OK);
+end;
+
+procedure RestartSavedManager;
+begin
+  if not ManagerWasRunning then Exit;
+  ManagerWasRunning := False;
+  if not StartServiceByName(ManagerServiceName) then
+    Log('WGClientManager konnte nach Abbruch nicht neu gestartet werden.');
 end;
 
 procedure RestartSavedTunnels;
@@ -442,6 +482,18 @@ begin
   Result := '';
   if RestartTunnels = nil then RestartTunnels := TStringList.Create;
   if EmbeddedTunnels = nil then EmbeddedTunnels := TStringList.Create;
+
+  if RegKeyExists(HKLM, ServiceKeyByName(ManagerServiceName)) then
+  begin
+    State := ServiceStateByName(ManagerServiceName);
+    ManagerWasRunning := (State >= StartPending) and (State <> StopPending);
+    if not StopServiceByName(ManagerServiceName) then
+    begin
+      Result := 'Der Dienst "WG Client Manager" konnte nicht gestoppt werden. Das Update wurde angehalten.';
+      Exit;
+    end;
+  end;
+
   Verified := False;
   if FindFirst(ActiveDir + '*.conf', FindRec) then
   try
@@ -458,6 +510,7 @@ begin
         begin
           if not VerifyEmbeddedInstallation then
           begin
+            RestartSavedManager;
             Result := 'Der Programmordner der Standalone-Edition ist unsicher oder unvollständig. WG Client unter Programme neu installieren.';
             Exit;
           end;
@@ -472,6 +525,7 @@ begin
         if not StopTunnel(Name) then
         begin
           RestartSavedTunnels;
+          RestartSavedManager;
           Result := 'Tunnel "' + Name + '" konnte nicht gestoppt werden. Das Update wurde angehalten.';
           Exit;
         end;
@@ -504,7 +558,11 @@ end;
 
 procedure DeinitializeSetup;
 begin
-  if not PostInstallReached then RestartSavedTunnels;
+  if not PostInstallReached then
+  begin
+    RestartSavedTunnels;
+    RestartSavedManager;
+  end;
   if RestartTunnels <> nil then RestartTunnels.Free;
   if EmbeddedTunnels <> nil then EmbeddedTunnels.Free;
 end;
@@ -517,13 +575,15 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
+  ManagerRemoved: Boolean;
 begin
   DataDir := ExpandConstant('{commonappdata}\WGClient');
   if CurUninstallStep = usUninstall then
   begin
-    AllTunnelsStopped := StopAppTunnels;
+    ManagerRemoved := StopServiceByName(ManagerServiceName) and DeleteServiceByName(ManagerServiceName);
+    AllTunnelsStopped := StopAppTunnels and ManagerRemoved;
     if not AllTunnelsStopped then
-      RaiseException('Mindestens ein Tunnel-Dienst konnte nicht gestoppt und entfernt werden.');
+      RaiseException('Mindestens ein WG-Client-Dienst konnte nicht gestoppt und entfernt werden.');
   end;
 
   if (CurUninstallStep = usPostUninstall) and AllTunnelsStopped and DirExists(DataDir) and not UninstallSilent then

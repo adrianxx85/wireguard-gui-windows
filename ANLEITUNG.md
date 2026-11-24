@@ -47,8 +47,13 @@ Zwei Editionen:
 2. Erste Schritte
 -----------------
 
-1. WG Client starten (Startmenü oder Desktop). Die App fragt jedes Mal nach
-   Administratorrechten – das ist nötig, weil sie VPN-Tunnel einrichtet.
+1. WG Client starten (Startmenü oder Desktop).
+   - Als Standardbenutzer startet die App ohne UAC-Abfrage: bereits eingerichtete
+     Tunnel lassen sich direkt verbinden und trennen (inkl. Live-Status und Log).
+     Der private Schlüssel bleibt dabei für Standardbenutzer unzugänglich.
+   - Zum Importieren, Erstellen, Bearbeiten oder Entfernen von Tunneln auf
+     "Als Administrator öffnen" klicken (oder eine .conf-Datei in das Fenster
+     ziehen bzw. per "Öffnen mit" öffnen).
 2. Auf "+ Konfiguration importieren" klicken und deine .conf-Datei wählen.
    Alternativ: die .conf-Datei einfach in das Fenster ziehen, oder per
    Rechtsklick auf die Datei -> "Öffnen mit" -> "WG Client".

@@ -81,6 +81,78 @@ internal static class NativeServices
 
     // ---------- Eigene Tunnel-Dienste (Standalone-Edition) ----------
 
+    /// <summary>Legt einen Dienst an (oder aktualisiert ihn) und startet ihn.</summary>
+    public static void CreateOrUpdateAndStart(string name, string displayName, string description, string binaryPathName, bool autostart, bool unrestrictedSid)
+    {
+        var scm = OpenSCManagerW(null, null, SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE);
+        if (scm == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+        try
+        {
+            const uint access = SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_STOP | SERVICE_CHANGE_CONFIG | DELETE;
+            var startType = autostart ? SERVICE_AUTO_START : SERVICE_DEMAND_START;
+            var service = CreateServiceW(scm, name, displayName, access,
+                SERVICE_WIN32_OWN_PROCESS, startType, SERVICE_ERROR_NORMAL,
+                binaryPathName, null, IntPtr.Zero, unrestrictedSid ? "Nsi\0TcpIp\0\0" : null, null, null);
+            if (service.IsInvalid)
+            {
+                var error = Marshal.GetLastWin32Error();
+                service.Dispose();
+                if (error != ERROR_SERVICE_EXISTS) throw new System.ComponentModel.Win32Exception(error);
+                service = OpenServiceW(scm, name, access);
+                if (service.IsInvalid)
+                {
+                    var openErr = Marshal.GetLastWin32Error();
+                    service.Dispose();
+                    throw new System.ComponentModel.Win32Exception(openErr);
+                }
+                using (service)
+                {
+                    if (!ChangeServiceConfigW(service, SERVICE_WIN32_OWN_PROCESS, startType, SERVICE_ERROR_NORMAL,
+                            binaryPathName, null, IntPtr.Zero, unrestrictedSid ? "Nsi\0TcpIp\0\0" : null, null, null, displayName))
+                        throw new System.ComponentModel.Win32Exception();
+                    ConfigureAndStart(service, description, unrestrictedSid);
+                    return;
+                }
+            }
+            using (service) ConfigureAndStart(service, description, unrestrictedSid);
+        }
+        finally { CloseServiceHandle(scm); }
+    }
+
+    static void ConfigureAndStart(ServiceHandle service, string description, bool unrestrictedSid)
+    {
+        if (unrestrictedSid)
+        {
+            var sidInfo = SERVICE_SID_TYPE_UNRESTRICTED;
+            if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_SERVICE_SID_INFO, ref sidInfo))
+                throw new System.ComponentModel.Win32Exception();
+        }
+        var desc = new SERVICE_DESCRIPTION { lpDescription = description };
+        if (!ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, ref desc))
+            throw new System.ComponentModel.Win32Exception();
+        if (service.QueryStatus() != Status.Running && !StartServiceW(service, 0, IntPtr.Zero))
+        {
+            var err = Marshal.GetLastWin32Error();
+            if (err != ERROR_SERVICE_ALREADY_RUNNING) throw new System.ComponentModel.Win32Exception(err);
+        }
+    }
+
+    public static void StopAndDelete(string serviceName, TimeSpan timeout)
+    {
+        using var service = OpenForRemoval(serviceName, out var markedForDeletion);
+        if (service is null) return;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stopRequested = false;
+        while (service.QueryStatus() != Status.Stopped)
+        {
+            if (sw.Elapsed >= timeout) break;
+            if (!stopRequested && service.QueryStatus() != Status.StopPending)
+                stopRequested = service.RequestStop();
+            Thread.Sleep(250);
+        }
+        service.MarkForDeletion();
+    }
+
     /// <summary>Legt einen Dienst nach den Vorgaben des WireGuard embeddable-dll-service an und startet ihn.</summary>
     public static void CreateAndStart(string name, string displayName, string description, string binaryPathName, bool autostart)
     {
@@ -126,11 +198,18 @@ internal static class NativeServices
     const int ERROR_SERVICE_NOT_ACTIVE = 1062;
     const int ERROR_SERVICE_CANNOT_ACCEPT_CTRL = 1061;
     const int ERROR_INVALID_SERVICE_CONTROL = 1052;
+    const int ERROR_SERVICE_ALREADY_RUNNING = 1056;
+    const int ERROR_SERVICE_EXISTS = 1073;
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern ServiceHandle CreateServiceW(IntPtr scm, string name, string displayName, uint access, uint type,
         uint startType, uint errorControl, string binaryPathName, string? loadOrderGroup, IntPtr tagId,
         string? dependencies, string? serviceStartName, string? password);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool ChangeServiceConfigW(ServiceHandle svc, uint type, uint startType, uint errorControl,
+        string binaryPathName, string? loadOrderGroup, IntPtr tagId, string? dependencies,
+        string? serviceStartName, string? password, string? displayName);
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool ChangeServiceConfig2W(ServiceHandle svc, uint infoLevel, ref uint info);
